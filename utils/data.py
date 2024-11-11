@@ -178,16 +178,35 @@ class GPCurvesReader(object):
         )
 
 
-def get_data():
-    MAX_CONTEXT_POINTS = 10
+def get_data(
+    batch_size=(64, 1),
+    max_num_context=10,
+    xdims=1,
+    ydims=1,
+    l1_scale=0.4,
+    sigma_scale=1.0,
+):
 
     # Train dataset
-    dataset_train = GPCurvesReader(batch_size=64, max_num_context=MAX_CONTEXT_POINTS)
+    dataset_train = GPCurvesReader(
+        batch_size=batch_size[0],
+        max_num_context=max_num_context,
+        x_size=xdims,
+        y_size=ydims,
+        l1_scale=l1_scale,
+        sigma_scale=sigma_scale,
+    )
     data_train = dataset_train.generate_curves()
 
     # Test dataset
     dataset_test = GPCurvesReader(
-        batch_size=1, max_num_context=MAX_CONTEXT_POINTS, testing=True
+        batch_size=batch_size[1],
+        max_num_context=max_num_context,
+        x_size=xdims,
+        y_size=ydims,
+        l1_scale=l1_scale,
+        sigma_scale=sigma_scale,
+        testing=True,
     )
     data_test = dataset_test.generate_curves()
 
