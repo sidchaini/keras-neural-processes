@@ -1,0 +1,24 @@
+# This CITATION.cff file was generated with cffinit.
+# Visit https://bit.ly/cffinit to generate yours today!
+
+cff-version: 1.2.0
+title: keras-neuralprocesses
+message: >-
+  If you use this software, please cite it using the
+  metadata from this file.
+type: software
+authors:
+  - given-names: Siddharth
+    family-names: Chaini
+    email: sidchaini@gmail.com
+    affiliation: University of Delaware
+    orcid: 'https://orcid.org/0000-0001-5078-5457'
+  - given-names: Federica B.
+    family-names: Bianco
+    affiliation: University of Delaware
+    orcid: 'https://orcid.org/0000-0003-1953-8727'
+repository-code: 'https://github.com/sidchaini/keras-neuralprocesses/'
+abstract: >-
+  Neural Processes written in Keras. Based on Keras 3 (using
+  TF backend right now - plans to support PyTorch/Jax in the
+  future).
