@@ -1,5 +1,4 @@
-# scnps
- Sid Chaini Neural ProcesseS
+# keras-neuralprocesses
+ Neural Processes written in Keras.
 
-
-Based on Keras (using TF backend right now - plans to support PyTorch/Jax in the future).
+Based on Keras 3 (using TF backend right now - plans to support PyTorch/Jax in the future).
