@@ -178,7 +178,7 @@ class GPCurvesReader(object):
         )
 
 
-def get_data(
+def get_train_data(
     batch_size=(64, 1),
     max_num_context=10,
     xdims=1,
@@ -198,6 +198,33 @@ def get_data(
     )
     data_train = dataset_train.generate_curves()
 
+    (context_x_train, context_y_train), target_x_train = data_train.query
+    target_y_train = data_train.target_y.numpy()
+
+    context_x_train = context_x_train.numpy()
+    context_y_train = context_y_train.numpy()
+    target_x_train = target_x_train.numpy()
+
+    # num_total_points_train = data_train.num_total_points.numpy()
+    # num_context_points_train = data_train.num_context_points.numpy()
+
+    return (
+        context_x_train,
+        context_y_train,
+        target_x_train,
+        target_y_train,
+    )
+
+
+def get_data_test(
+    batch_size=(64, 1),
+    max_num_context=10,
+    xdims=1,
+    ydims=1,
+    l1_scale=0.4,
+    sigma_scale=1.0,
+):
+
     # Test dataset
     dataset_test = GPCurvesReader(
         batch_size=batch_size[1],
@@ -210,29 +237,16 @@ def get_data(
     )
     data_test = dataset_test.generate_curves()
 
-    (context_x_train, context_y_train), target_x_train = data_train.query
-    num_total_points_train = data_train.num_total_points.numpy()
-    num_context_points_train = data_train.num_context_points.numpy()
-    target_y_train = data_train.target_y.numpy()
-
     (context_x_test, context_y_test), target_x_test = data_test.query
     num_total_points_test = data_test.num_total_points.numpy()
     num_context_points_test = data_test.num_context_points.numpy()
     target_y_test = data_test.target_y.numpy()
-
-    context_x_train = context_x_train.numpy()
-    context_y_train = context_y_train.numpy()
-    target_x_train = target_x_train.numpy()
 
     context_x_test = context_x_test.numpy()
     context_y_test = context_y_test.numpy()
     target_x_test = target_x_test.numpy()
 
     return (
-        context_x_train,
-        context_y_train,
-        target_x_train,
-        target_y_train,
         context_x_test,
         context_y_test,
         target_x_test,
