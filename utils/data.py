@@ -216,7 +216,7 @@ def get_train_data(
     )
 
 
-def get_data_test(
+def get_test_data(
     batch_size=(64, 1),
     max_num_context=10,
     xdims=1,
@@ -252,3 +252,12 @@ def get_data_test(
         target_x_test,
         target_y_test,
     )
+
+
+""" TODO:
+Maybe the way forward is to have two functions: 
+ - one takes the original dataset (which can be the 
+above kernel original objects OR original light curves)
+- and then another function samples from this differently
+  every training loop
+"""
