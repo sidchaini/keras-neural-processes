@@ -3,6 +3,7 @@
 ### GP CODE from [CNP repo](https://github.com/google-deepmind/neural-processes/blob/master/conditional_neural_process.ipynb)
 
 import tensorflow as tf
+import numpy as np
 
 
 # shape is (samples, points, channels) for x and y both
