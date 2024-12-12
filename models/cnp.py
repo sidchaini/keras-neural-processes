@@ -5,8 +5,9 @@ from keras import ops
 import numpy as np
 import matplotlib.pyplot as plt
 import warnings
-from tqdm.auto import tqdm
 
+# from tqdm.auto import tqdm
+from keras.utils import Progbar
 
 from ..layers import encoders, decoders
 from ..utils.data import get_context_set
@@ -63,6 +64,7 @@ class CNP(keras.Model):
 
         return mean, std
 
+    @tf.function
     def train_step(self, context_x, context_y, target_x, target_y):
         with tf.GradientTape() as tape:
             # Forward pass
@@ -74,6 +76,7 @@ class CNP(keras.Model):
         self.optimizer.apply(grads, self.trainable_weights)
         return loss_value
 
+    @tf.function
     def test_step(self, context_x, context_y, pred_x):
         # Get model predictions and uncertainty estimates
         pred_y_mean, pred_y_std = self((context_x, context_y, pred_x))
@@ -104,7 +107,10 @@ class CNP(keras.Model):
         # with custom training loop.
         # checks on args
         assert batch_size == "all"  # batching not supported yet
-        epoch_iterator = tqdm(range(1, epochs + 1)) if pbar else range(1, epochs + 1)
+        # epoch_iterator = tqdm(range(1, epochs + 1)) if pbar else range(1, epochs + 1)
+        epoch_iterator = range(1, epochs + 1)
+        if pbar:
+            progbar = Progbar(epochs)
         self.optimizer = optimizer
 
         if plotcb:
@@ -142,7 +148,8 @@ class CNP(keras.Model):
             callbacks.on_epoch_end(epoch, logs)  # Called at end of epoch
 
             if pbar:
-                epoch_iterator.set_description(f"Train Loss: {loss:.4f}")
+                # epoch_iterator.set_description(f"Train Loss: {loss:.4f}")
+                progbar.update(epoch, values=[("loss", float(loss))])
 
             if plotcb and (epoch % plot_every == 0):
                 print(f"Epoch{epoch}, loss={loss} (lower is better)")
