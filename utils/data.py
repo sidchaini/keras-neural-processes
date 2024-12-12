@@ -2,14 +2,51 @@
 # ---
 ### GP CODE from [CNP repo](https://github.com/google-deepmind/neural-processes/blob/master/conditional_neural_process.ipynb)
 
-import collections
-
 import tensorflow as tf
 
-CNPRegressionDescription = collections.namedtuple(
-    "CNPRegressionDescription",
-    ("query", "target_y", "num_total_points", "num_context_points"),
-)
+
+# shape is (samples, points, channels) for x and y both
+def get_context_set(
+    target_x,
+    target_y,
+    num_context=7,  # ADD SUPPORT FOR RANGE LATER - then sample different num
+    # context_frac_range=[0.01, 0.05]
+):
+    """
+    Remember that context sets are a subset of the target set.
+    context_frac is fraction of target set to be made context set.
+    """
+    assert (
+        target_x.shape[:-1] == target_y.shape[:-1]
+    )  # the inputs should have same no. of samples and points, channels may differ
+    n_points = target_x.shape[1]
+
+    # n_samples = target_x.shape[0]
+    # nx_channels = target_x.shape[2]
+    # ny_channels = target_y.shape[2]
+
+    # num_context = np.random.randint(low=context_frac_range[0]*n_samples, high=context_frac_range[1]*n_samples, dtype="int")
+    # context_points = int(context_frac*n_points)
+
+    indices = np.random.choice(
+        n_points, num_context, replace=False
+    )  # choose num_context points from n_points e.g. 6 from 400 randomly
+
+    if isinstance(target_x, np.ndarray):
+        context_x = target_x[:, indices, :]
+        context_y = target_y[:, indices, :]
+    elif tf.is_tensor(target_x):
+        context_x = tf.gather(target_x, indices, axis=1)
+        context_y = tf.gather(target_y, indices, axis=1)
+    else:
+        print("target_x is neither a NumPy array nor a TensorFlow tensor")
+
+    return context_x, context_y
+
+
+### Data copypaste
+# ---
+### GP CODE from [CNP repo](https://github.com/google-deepmind/neural-processes/blob/master/conditional_neural_process.ipynb)
 
 
 class GPCurvesReader(object):
@@ -25,11 +62,11 @@ class GPCurvesReader(object):
         self,
         batch_size,
         max_num_context,
+        num_target=400,
         x_size=1,
         y_size=1,
         l1_scale=0.4,
         sigma_scale=1.0,
-        testing=False,
     ):
         """Creates a regression dataset of functions sampled from a GP.
 
@@ -40,8 +77,6 @@ class GPCurvesReader(object):
           y_size: Integer >= 1 for length of "y values" vector.
           l1_scale: Float; typical scale for kernel distance function.
           sigma_scale: Float; typical scale for variance.
-          testing: Boolean that indicates whether we are testing. If so there are
-              more targets for visualization.
         """
         self._batch_size = batch_size
         self._max_num_context = max_num_context
@@ -49,7 +84,7 @@ class GPCurvesReader(object):
         self._y_size = y_size
         self._l1_scale = l1_scale
         self._sigma_scale = sigma_scale
-        self._testing = testing
+        self._num_target = num_target
 
     def _gaussian_kernel(self, xdata, l1, sigma_f, sigma_noise=2e-2):
         """Applies the Gaussian kernel to generate curve data.
@@ -95,7 +130,7 @@ class GPCurvesReader(object):
         Generated functions are `float32` with x values between -2 and 2.
 
         Returns:
-          A `CNPRegressionDescription` namedtuple.
+          context_x, context_x, target_x, target_y
         """
         num_context = tf.random.uniform(
             shape=[], minval=3, maxval=self._max_num_context, dtype=tf.int32
@@ -103,26 +138,45 @@ class GPCurvesReader(object):
 
         # If we are testing we want to have more targets and have them evenly
         # distributed in order to plot the function.
-        if self._testing:
-            num_target = 400
-            num_total_points = num_target
-            x_values = tf.tile(
-                tf.expand_dims(
-                    tf.range(-2.0, 2.0, 1.0 / 100, dtype=tf.float32), axis=0
-                ),
-                [self._batch_size, 1],
-            )
-            x_values = tf.expand_dims(x_values, axis=-1)
-        # During training the number of target points and their x-positions are
-        # selected at random
-        else:
-            num_target = tf.random.uniform(
-                shape=(), minval=2, maxval=self._max_num_context, dtype=tf.int32
-            )
-            num_total_points = num_context + num_target
-            x_values = tf.random.uniform(
-                [self._batch_size, num_total_points, self._x_size], -2, 2
-            )
+
+        # #SC THIS PART JUST CREATES IDENTICAL X_VALS 64 times
+        # EQUIVALENT NUMPY:
+        # # Parameters
+        # batch_size = 64  # Example batch size
+        # start = -2.0
+        # stop = 2.0
+        # step = 1.0 / 100
+
+        # # Create a 1D array of evenly spaced values
+        # x_values_1d = np.arange(start, stop, step, dtype=np.float32)
+
+        # # Expand dimensions to make it 2D
+        # x_values_2d = np.expand_dims(x_values_1d, axis=0)
+
+        # # Tile the array to create a batch
+        # x_values_batch = np.tile(x_values_2d, (batch_size, 1))
+
+        num_total_points = self._num_target
+        x_values = tf.tile(
+            tf.expand_dims(tf.range(-2.0, 2.0, 1.0 / 100, dtype=tf.float32), axis=0),
+            [self._batch_size, 1],
+        )
+        # #SC NOTE: Above 1 should be no. of xchannels I think
+        x_values = tf.expand_dims(x_values, axis=-1)
+
+        # # #SC
+        # # WHEN TRAINING
+        # # the number of target points and their x-positions are
+        # # selected at random
+        # # i.e b/w 3 and 10 points are chosen as no. of context.
+        # # and b/w 2 and 10 as no. of target
+        # # Note that now, all the points are different (note lack of tiling)
+
+        #   num_target = tf.random.uniform(
+        #       shape=(), minval=2, maxval=self._max_num_context, dtype=tf.int32)
+        #   num_total_points = num_context + num_target
+        #   x_values = tf.random.uniform(
+        #       [self._batch_size, num_total_points, self._x_size], -2, 2)
 
         # Set kernel parameters
         l1 = (
@@ -148,116 +202,60 @@ class GPCurvesReader(object):
         # [batch_size, num_total_points, y_size]
         y_values = tf.transpose(tf.squeeze(y_values, 3), [0, 2, 1])
 
-        if self._testing:
-            # Select the targets
-            target_x = x_values
-            target_y = y_values
+        # Select the targets
+        # #SC: WHEN TESTING everything is a target
+        target_x = x_values
+        target_y = y_values
 
-            # Select the observations
-            idx = tf.random.shuffle(tf.range(num_target))
-            context_x = tf.gather(x_values, idx[:num_context], axis=1)
-            context_y = tf.gather(y_values, idx[:num_context], axis=1)
+        # #SC: WHEN TESTING context is still a random sample of 10 points
+        # # Shuffling here b/c TEST XVALS were sequential
+        # Select the observations
+        idx = tf.random.shuffle(tf.range(self._num_target))
+        context_x = tf.gather(x_values, idx[:num_context], axis=1)
+        context_y = tf.gather(y_values, idx[:num_context], axis=1)
 
-        else:
-            # Select the targets which will consist of the context points as well as
-            # some new target points
-            target_x = x_values[:, : num_target + num_context, :]
-            target_y = y_values[:, : num_target + num_context, :]
+        # else:
+        #     # #SC: WHEN TRAINING, target is first n points.
+        #     # No shuffling here b/c TRAIN XVALS were random and not sequential
+        #     # Select the targets which will consist of the context points as well as
+        #     # some new target points
+        #     target_x = x_values[:, : num_target + num_context, :]
+        #     target_y = y_values[:, : num_target + num_context, :]
 
-            # Select the observations
-            context_x = x_values[:, :num_context, :]
-            context_y = y_values[:, :num_context, :]
+        #     # #SC: WHEN TRAINING, context is first m (<n) points
+        #     # Select the observations
+        #     context_x = x_values[:, :num_context, :]
+        #     context_y = y_values[:, :num_context, :]
 
-        query = ((context_x, context_y), target_x)
-
-        return CNPRegressionDescription(
-            query=query,
-            target_y=target_y,
-            num_total_points=tf.shape(target_x)[1],
-            num_context_points=num_context,
-        )
-
-
-def get_train_data(
-    batch_size=(64, 1),
-    max_num_context=10,
-    xdims=1,
-    ydims=1,
-    l1_scale=0.4,
-    sigma_scale=1.0,
-):
-
-    # Train dataset
-    dataset_train = GPCurvesReader(
-        batch_size=batch_size[0],
-        max_num_context=max_num_context,
-        x_size=xdims,
-        y_size=ydims,
-        l1_scale=l1_scale,
-        sigma_scale=sigma_scale,
-    )
-    data_train = dataset_train.generate_curves()
-
-    (context_x_train, context_y_train), target_x_train = data_train.query
-    target_y_train = data_train.target_y.numpy()
-
-    context_x_train = context_x_train.numpy()
-    context_y_train = context_y_train.numpy()
-    target_x_train = target_x_train.numpy()
-
-    # num_total_points_train = data_train.num_total_points.numpy()
-    # num_context_points_train = data_train.num_context_points.numpy()
-
-    return (
-        context_x_train,
-        context_y_train,
-        target_x_train,
-        target_y_train,
-    )
+        return context_x, context_y, target_x, target_y
+        # num_total_points = target_x.shape[1]
+        # num_context_points = num_context
 
 
-def get_test_data(
-    batch_size=(64, 1),
-    max_num_context=10,
-    xdims=1,
-    ydims=1,
-    l1_scale=0.4,
-    sigma_scale=1.0,
-):
-
-    # Test dataset
-    dataset_test = GPCurvesReader(
-        batch_size=batch_size[1],
-        max_num_context=max_num_context,
-        x_size=xdims,
-        y_size=ydims,
-        l1_scale=l1_scale,
-        sigma_scale=sigma_scale,
-        testing=True,
-    )
-    data_test = dataset_test.generate_curves()
-
-    (context_x_test, context_y_test), target_x_test = data_test.query
-    num_total_points_test = data_test.num_total_points.numpy()
-    num_context_points_test = data_test.num_context_points.numpy()
-    target_y_test = data_test.target_y.numpy()
-
-    context_x_test = context_x_test.numpy()
-    context_y_test = context_y_test.numpy()
-    target_x_test = target_x_test.numpy()
-
-    return (
-        context_x_test,
-        context_y_test,
-        target_x_test,
-        target_y_test,
-    )
+# So generate 65, first 64 become train, then get sampled. 1 remains test.
+# So there probably needs to be some way to pass the sampling strategy to the model
 
 
-""" TODO:
-Maybe the way forward is to have two functions: 
- - one takes the original dataset (which can be the 
-above kernel original objects OR original light curves)
-- and then another function samples from this differently
-  every training loop
-"""
+def generate_target_curves(train_samples=64, test_samples=1, max_num_context=10):
+    tot_curves = train_samples + test_samples
+    obj = GPCurvesReader(batch_size=tot_curves, max_num_context=max_num_context)
+    _, __, target_x, target_y = obj.generate_curves()
+    target_x = target_x.numpy()
+    target_y = target_y.numpy()
+
+    return target_x, target_y
+
+
+def generate_deepmind_curves(train_samples=64, test_samples=1, max_num_context=10):
+    tot_curves = train_samples + test_samples
+    obj = GPCurvesReader(batch_size=tot_curves, max_num_context=max_num_context)
+    _, __, target_x, target_y = obj.generate_curves()
+    target_x = target_x.numpy()
+    target_y = target_y.numpy()
+
+    target_x_train = target_x[:train_samples, :, :]
+    target_y_train = target_y[:train_samples, :, :]
+    target_x_test = target_x[train_samples:, :, :]
+    target_y_test = target_y[train_samples:, :, :]
+
+    return target_x_train, target_y_train, target_x_test, target_y_test

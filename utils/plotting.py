@@ -3,6 +3,45 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 
 
+def plot_functions(target_x, target_y, context_x, context_y, pred_y, std):
+    """Plots the predicted mean and variance and the context points.
+
+    Args:
+      target_x: An array of shape batchsize x number_targets x 1 that contains the
+          x values of the target points.
+      target_y: An array of shape batchsize x number_targets x 1 that contains the
+          y values of the target points.
+      context_x: An array of shape batchsize x number_context x 1 that contains
+          the x values of the context points.
+      context_y: An array of shape batchsize x number_context x 1 that contains
+          the y values of the context points.
+      pred_y: An array of shape batchsize x number_targets x 1  that contains the
+          predicted means of the y values at the target points in target_x.
+      pred_y: An array of shape batchsize x number_targets x 1  that contains the
+          predicted variance of the y values at the target points in target_x.
+    """
+    # Plot everything
+    plt.plot(target_x[0], pred_y[0], "b", linewidth=2, label="pred")
+    plt.plot(target_x[0], target_y[0], "k:", linewidth=2, label="truth")
+    plt.plot(context_x[0], context_y[0], "ko", markersize=10, label="context")
+    plt.fill_between(
+        target_x[0, :, 0],
+        pred_y[0, :, 0] - std[0, :, 0],
+        pred_y[0, :, 0] + std[0, :, 0],
+        alpha=0.2,
+        facecolor="#65c9f7",
+        interpolate=True,
+    )
+
+    # Make the plot pretty
+    plt.yticks([-2, 0, 2], fontsize=16)
+    plt.xticks([-2, 0, 2], fontsize=16)
+    plt.ylim([-2, 2])
+    ax = plt.gca()
+    ax.set_facecolor("white")
+    return ax
+
+
 # IMPROVE BELOW
 # - move model predict outside loop
 # - check for other consistencies with the 1d method
