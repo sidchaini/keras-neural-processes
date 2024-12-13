@@ -274,7 +274,11 @@ def generate_deepmind_curves(train_samples=64, test_samples=1, max_num_context=1
 
 
 def generate_traintest(
-    train_size=10000, test_size=1, max_num_context=10, batch_size_gp=100
+    train_size=10000,
+    test_size=1,
+    max_num_context=10,
+    batch_size_gp=100,
+    pbar=True,
 ):
     total_size = train_size + test_size
     num_batches = np.ceil(total_size / batch_size_gp).astype(int)
@@ -282,7 +286,13 @@ def generate_traintest(
     y = np.zeros((total_size, 400, 1), dtype="float32")
     reader = GPCurvesReader(batch_size=batch_size_gp, max_num_context=max_num_context)
 
-    for i in tqdm(range(num_batches)):
+    if pbar:
+        from tqdm.auto import tqdm
+
+        iterator = tqdm(range(num_batches))
+    else:
+        iterator = range(num_batches)
+    for i in iterator:
         _, __, target_x, target_y = reader.generate_curves()
         start_idx = i * batch_size_gp
         end_idx = min((i + 1) * batch_size_gp, total_size)

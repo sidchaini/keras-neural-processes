@@ -10,7 +10,7 @@ import warnings
 from keras.utils import Progbar
 
 from ..layers import encoders, decoders
-from ..utils.data import get_context_set
+from ..utils.data import get_train_batch, get_context_set
 from ..utils.metrics import calculate_mymetrics
 from ..utils.plotting import plot_functions
 
@@ -64,7 +64,7 @@ class CNP(keras.Model):
 
         return mean, std
 
-    @tf.function
+    @tf.function(jit_compile=True)
     def train_step(self, context_x, context_y, target_x, target_y):
         with tf.GradientTape() as tape:
             # Forward pass
@@ -76,7 +76,7 @@ class CNP(keras.Model):
         self.optimizer.apply(grads, self.trainable_weights)
         return loss_value
 
-    @tf.function
+    @tf.function(jit_compile=True)
     def test_step(self, context_x, context_y, pred_x):
         # Get model predictions and uncertainty estimates
         pred_y_mean, pred_y_std = self((context_x, context_y, pred_x))
@@ -88,7 +88,7 @@ class CNP(keras.Model):
         y_train,
         epochs,
         optimizer,
-        batch_size="all",
+        batch_size=64,
         X_val=None,
         y_val=None,
         plotcb=True,
@@ -99,20 +99,14 @@ class CNP(keras.Model):
         """Custom training loop for the CNP model.
 
         Args:
-            data: List of data: (context_x, context_y, target_x, target_y)
             optimizer: Keras optimizer instance
             epochs: Number of training epochs
         """
-        # Custom function as an alternative to .fit()
-        # with custom training loop.
-        # checks on args
-        assert batch_size == "all"  # batching not supported yet
-        # epoch_iterator = tqdm(range(1, epochs + 1)) if pbar else range(1, epochs + 1)
-        epoch_iterator = range(1, epochs + 1)
+
+        # assert batch_size == "all" # batching not supported yet
+        self.optimizer = optimizer
         if pbar:
             progbar = Progbar(epochs)
-        self.optimizer = optimizer
-
         if plotcb:
             assert X_val is not None and y_val is not None
 
@@ -123,19 +117,24 @@ class CNP(keras.Model):
         # Configure callbacks
         callbacks.on_train_begin()  # Called at the start of training
 
-        # no batching yet - possibly implement later
-        for epoch in epoch_iterator:
+        for epoch in range(1, epochs + 1):
             # Reset metrics at start of each epoch
             callbacks.on_epoch_begin(epoch)  # Called at start of epoch
 
-            # sample context set from fixed target set
-            context_x_train, context_y_train = get_context_set(
-                X_train, y_train, num_context=np.random.randint(low=3, high=10 + 1)
+            # batching strategy: sample randomly from big train set
+            X_train_batch, y_train_batch = get_train_batch(
+                X_train, y_train, batch_size=batch_size
             )
 
-            #
-            target_x_train = X_train
-            target_y_train = y_train
+            # sample context set from fixed target set
+            context_x_train, context_y_train = get_context_set(
+                X_train_batch,
+                y_train_batch,
+                num_context=np.random.randint(low=3, high=10 + 1),
+            )
+
+            target_x_train = X_train_batch
+            target_y_train = y_train_batch
 
             loss = self.train_step(
                 context_x_train, context_y_train, target_x_train, target_y_train
@@ -148,12 +147,9 @@ class CNP(keras.Model):
             callbacks.on_epoch_end(epoch, logs)  # Called at end of epoch
 
             if pbar:
-                # epoch_iterator.set_description(f"Train Loss: {loss:.4f}")
                 progbar.update(epoch, values=[("loss", float(loss))])
 
             if plotcb and (epoch % plot_every == 0):
-                print(f"Epoch{epoch}, loss={loss} (lower is better)")
-
                 context_x_val, context_y_val = get_context_set(
                     X_val, y_val, num_context=np.random.randint(low=2, high=10 + 1)
                 )
@@ -169,7 +165,12 @@ class CNP(keras.Model):
                     context_x_val, context_y_val, pred_x_val
                 )
 
-                # Calculate mymetrics
+                # Calc and print val_loss
+                dist = tfp.distributions.MultivariateNormalDiag(pred_y_mean, pred_y_std)
+                val_loss = -ops.mean(dist.log_prob(target_y_val))
+                print(f"\nEpoch{epoch}, val_loss={val_loss} (lower is better)")
+
+                # Calc and print other metrics
                 mymetrics = calculate_mymetrics(
                     pred_x_val,
                     pred_y_mean,
@@ -181,7 +182,7 @@ class CNP(keras.Model):
                 )
                 for metric_name, value in mymetrics.items():
                     print(f"{metric_name}: {value:.1%} (higher is better)")
-
+                print(f"num_context_points = {context_x_val.shape[1]}")
                 # Visualize predictions
                 plot_functions(
                     target_x=target_x_val,
