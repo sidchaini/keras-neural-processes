@@ -1,7 +1,3 @@
-### Data copypaste
-# ---
-### GP CODE from [CNP repo](https://github.com/google-deepmind/neural-processes/blob/master/conditional_neural_process.ipynb)
-
 import tensorflow as tf
 import numpy as np
 
@@ -43,6 +39,25 @@ def get_context_set(
         print("target_x is neither a NumPy array nor a TensorFlow tensor")
 
     return context_x, context_y
+
+
+# shape is (samples, points, channels) for x and y both
+def get_train_batch(X_train, y_train, batch_size=64):
+    assert X_train.shape[:-1] == y_train.shape[:-1]
+    tot_samples = X_train.shape[0]
+    # choose batch_size points from tot_batches e.g. 64 from 10000 randomly
+    batch_indices = np.random.choice(tot_samples, batch_size, replace=False)
+
+    if isinstance(X_train, np.ndarray):
+        X_train_batch = X_train[batch_indices, :, :]
+        y_train_batch = y_train[batch_indices, :, :]
+    elif tf.is_tensor(X_train):
+        X_train_batch = tf.gather(X_train, batch_indices, axis=0)
+        y_train_batch = tf.gather(y_train, batch_indices, axis=0)
+    else:
+        print("X_train is neither a NumPy array nor a TensorFlow tensor")
+
+    return X_train_batch, y_train_batch
 
 
 ### Data copypaste
@@ -233,10 +248,6 @@ class GPCurvesReader(object):
         # num_context_points = num_context
 
 
-# So generate 65, first 64 become train, then get sampled. 1 remains test.
-# So there probably needs to be some way to pass the sampling strategy to the model
-
-
 def generate_target_curves(train_samples=64, test_samples=1, max_num_context=10):
     tot_curves = train_samples + test_samples
     obj = GPCurvesReader(batch_size=tot_curves, max_num_context=max_num_context)
@@ -260,3 +271,26 @@ def generate_deepmind_curves(train_samples=64, test_samples=1, max_num_context=1
     target_y_test = target_y[train_samples:, :, :]
 
     return target_x_train, target_y_train, target_x_test, target_y_test
+
+
+def generate_traintest(
+    train_size=10000, test_size=1, max_num_context=10, batch_size_gp=100
+):
+    total_size = train_size + test_size
+    num_batches = np.ceil(total_size / batch_size_gp).astype(int)
+    X = np.zeros((total_size, 400, 1), dtype="float32")
+    y = np.zeros((total_size, 400, 1), dtype="float32")
+    reader = GPCurvesReader(batch_size=batch_size_gp, max_num_context=max_num_context)
+
+    for i in tqdm(range(num_batches)):
+        _, __, target_x, target_y = reader.generate_curves()
+        start_idx = i * batch_size_gp
+        end_idx = min((i + 1) * batch_size_gp, total_size)
+
+        X[start_idx:end_idx] = target_x[: end_idx - start_idx]
+        y[start_idx:end_idx] = target_y[: end_idx - start_idx]
+
+    X_train, X_test = X[:train_size], X[train_size:]
+    y_train, y_test = y[:train_size], y[train_size:]
+
+    return X_train, y_train, X_test, y_test
