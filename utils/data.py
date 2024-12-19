@@ -60,6 +60,39 @@ def get_train_batch(X_train, y_train, batch_size=64):
     return X_train_batch, y_train_batch
 
 
+def generate_traintest(
+    train_size=10000,
+    test_size=1,
+    max_num_context=10,
+    batch_size_gp=100,
+    pbar=True,
+):
+    total_size = train_size + test_size
+    num_batches = np.ceil(total_size / batch_size_gp).astype(int)
+    X = np.zeros((total_size, 400, 1), dtype="float32")
+    y = np.zeros((total_size, 400, 1), dtype="float32")
+    reader = GPCurvesReader(batch_size=batch_size_gp, max_num_context=max_num_context)
+
+    if pbar:
+        from tqdm.auto import tqdm
+
+        iterator = tqdm(range(num_batches))
+    else:
+        iterator = range(num_batches)
+    for i in iterator:
+        _, __, target_x, target_y = reader.generate_curves()
+        start_idx = i * batch_size_gp
+        end_idx = min((i + 1) * batch_size_gp, total_size)
+
+        X[start_idx:end_idx] = target_x[: end_idx - start_idx]
+        y[start_idx:end_idx] = target_y[: end_idx - start_idx]
+
+    X_train, X_test = X[:train_size], X[train_size:]
+    y_train, y_test = y[:train_size], y[train_size:]
+
+    return X_train, y_train, X_test, y_test
+
+
 ### Data copypaste
 # ---
 ### GP CODE from [CNP repo](https://github.com/google-deepmind/neural-processes/blob/master/conditional_neural_process.ipynb)
