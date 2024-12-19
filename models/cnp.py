@@ -25,7 +25,11 @@ from ..utils.plotting import plot_functions
 # Full CNP model
 class CNP(keras.Model):
     # Init is for all input-independent initialization
-    def __init__(self, encoder_sizes=[128, 128, 128, 128], decoder_sizes=[128, 128, 2]):
+    def __init__(
+        self,
+        encoder_sizes=[128, 128, 128, 128],
+        decoder_sizes=[128, 128],
+    ):
         super().__init__()
         self.encoder_sizes = encoder_sizes
         self.decoder_sizes = decoder_sizes
@@ -53,7 +57,7 @@ class CNP(keras.Model):
         self.decoder = decoders.DeterministicDecoder(self.decoder_sizes)
 
     # Call is for the forward computation
-    def call(self, inputs):  # double check training default
+    def call(self, inputs, training=False):  # double check training default
         context_x, context_y, target_x = inputs
 
         # Get representation from encoder
@@ -70,7 +74,7 @@ class CNP(keras.Model):
             # Forward pass
             mean, std = self((context_x, context_y, target_x), training=True)
             # Compute negative log likelihood loss
-            dist = tfp.distributions.MultivariateNormalDiag(mean, std)
+            dist = tfp.distributions.MultivariateNormalDiag(loc=mean, scale_diag=std)
             loss_value = -ops.mean(dist.log_prob(target_y))
         grads = tape.gradient(loss_value, self.trainable_weights)
         self.optimizer.apply(grads, self.trainable_weights)
@@ -180,9 +184,11 @@ class CNP(keras.Model):
                     context_x_val,
                     context_y_val,
                 )
+
                 for metric_name, value in mymetrics.items():
                     print(f"{metric_name}: {value:.1%} (higher is better)")
                 print(f"num_context_points = {context_x_val.shape[1]}")
+
                 # Visualize predictions
                 plot_functions(
                     target_x=target_x_val,
