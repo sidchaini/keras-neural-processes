@@ -19,24 +19,54 @@ def get_context_set(
     n_points = target_x.shape[1]
 
     # n_samples = target_x.shape[0]
-    # nx_channels = target_x.shape[2]
-    # ny_channels = target_y.shape[2]
+    nx_channels = target_x.shape[2]
+    ny_channels = target_y.shape[2]
 
     # num_context = np.random.randint(low=context_frac_range[0]*n_samples, high=context_frac_range[1]*n_samples, dtype="int")
     # context_points = int(context_frac*n_points)
 
-    indices = np.random.choice(
-        n_points, num_context, replace=False
-    )  # choose num_context points from n_points e.g. 6 from 400 randomly
+    context_x = []
+    context_y = []
 
-    if isinstance(target_x, np.ndarray):
-        context_x = target_x[:, indices, :]
-        context_y = target_y[:, indices, :]
-    elif tf.is_tensor(target_x):
-        context_x = tf.gather(target_x, indices, axis=1)
-        context_y = tf.gather(target_y, indices, axis=1)
-    else:
-        print("target_x is neither a NumPy array nor a TensorFlow tensor")
+    for xchannel in range(nx_channels):
+        indices = np.random.choice(
+            n_points, num_context, replace=False
+        )  # choose num_context points from n_points randomly for x channel
+
+        if isinstance(target_x, np.ndarray):
+            context_x.append(target_x[:, indices, xchannel])
+        elif tf.is_tensor(target_x):
+            context_x.append(tf.gather(target_x[:, :, xchannel], indices, axis=1))
+        else:
+            raise ValueError(
+                "target_x is neither a NumPy array nor a TensorFlow tensor"
+            )
+
+    context_x = (
+        np.stack(context_x, axis=-1)
+        if isinstance(target_x, np.ndarray)
+        else tf.stack(context_x, axis=-1)
+    )
+
+    for ychannel in range(ny_channels):
+        indices = np.random.choice(
+            n_points, num_context, replace=False
+        )  # choose num_context points from n_points randomly for y channel
+
+        if isinstance(target_y, np.ndarray):
+            context_y.append(target_y[:, indices, ychannel])
+        elif tf.is_tensor(target_y):
+            context_y.append(tf.gather(target_y[:, :, ychannel], indices, axis=1))
+        else:
+            raise ValueError(
+                "target_y must be either a NumPy array or a TensorFlow tensor"
+            )
+
+    context_y = (
+        np.stack(context_y, axis=-1)
+        if isinstance(target_y, np.ndarray)
+        else tf.stack(context_y, axis=-1)
+    )
 
     return context_x, context_y
 
