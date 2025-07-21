@@ -24,9 +24,10 @@ classifiers = [
 ]
 dependencies = [
     "numpy",
-    "keras",
-    "tensorflow",
-    "tensorflow_probability",
+    "keras>=3",
+    "tensorflow>=2",
+    "tensorflow_probability>=0.25.0",
+    "matplotlib",
 ]
 
 [tool.setuptools.dynamic]

@@ -229,7 +229,8 @@ class DeterministicDecoder(layers.Layer):
     def build(self, input_shape):
         representation_shape, target_x_shape = input_shape
 
-        # The input to the first Dense layer is the concatenation of representation and target_x
+        # The input to the first Dense layer is
+        # the concatenation of representation and target_x
         current_shape_dim = representation_shape[-1] + target_x_shape[-1]
         # Build each layer sequentially
         for layer in self.hidden_layers:
@@ -490,7 +491,8 @@ class NP(keras.Model):
         self.latent_encoder = LatentEncoder(self.latent_encoder_sizes, self.num_latents)
 
         full_decoder_sizes = self.decoder_sizes_hidden + [2 * self.output_dims]
-        # The decoder now needs to handle the concatenated deterministic and latent representations
+        # The decoder now needs to handle the concatenated
+        # deterministic and latent representations
         self.decoder = DeterministicDecoder(full_decoder_sizes)
 
     def build(self, input_shape):

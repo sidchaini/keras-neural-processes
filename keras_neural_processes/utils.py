@@ -30,11 +30,13 @@ def get_context_set(
     Args:
         target_x (np.array or tf.Tensor):
             Shape (batch_size, num_points, x_channels).
-            For multi-channel data in 'long' format, x_channels is typically 2 for (time, channel_id).
+            For multi-channel data in 'long' format, x_channels is typically
+            2 for (time, channel_id).
         target_y (np.array or tf.Tensor):
             Shape (batch_size, num_points, y_channels).
         num_context (int or list/tuple):
-            - If mode is "all": An integer specifying the total number of context points.
+            - If mode is "all": An integer specifying the total number of
+            context points.
             - If mode is "each": An integer for sampling that many points from *each*
               channel, OR a list/tuple specifying the number of points for each
               channel individually (e.g., [10, 5] for 2 channels).
@@ -76,7 +78,8 @@ def get_context_set(
         # 2. Get the indices that would sort the channel IDs
         sort_idx = np.argsort(all_channel_ids, kind="stable")
 
-        # 3. Find the locations where the channel ID changes. These are the boundaries of each group.
+        # 3. Find the locations where the channel
+        # ID changes. These are the boundaries of each group.
         #    We use np.diff on the sorted channel IDs to find these boundaries.
         sorted_channel_ids = all_channel_ids[sort_idx]
         # Adding a value at the end to ensure the last group is captured
@@ -94,7 +97,8 @@ def get_context_set(
         if isinstance(num_context, (list, tuple)):
             assert (
                 len(num_context) == n_channels
-            ), f"Length of num_context list ({len(num_context)}) must match the number of channels ({n_channels})"
+            ), f"Length of num_context list ({len(num_context)}) "
+            f"must match the number of channels ({n_channels})"
 
         all_channel_indices = []
         # This loop is now very fast as it just operates on pre-calculated groups
@@ -106,7 +110,8 @@ def get_context_set(
 
             if num_to_sample > len(channel_indices):
                 raise ValueError(
-                    f"Requesting {num_to_sample} context points for channel {channels[i]}, "
+                    f"Requesting {num_to_sample} context points "
+                    f"for channel {channels[i]}, "
                     f"but only {len(channel_indices)} are available."
                 )
 
@@ -433,7 +438,8 @@ def gplike_val_step(
     val_loss_fixed = -ops.mean(dist_fixed.log_prob(target_y_val_fixed))
     print(f"\nEpoch{epoch}, val_loss_fixed={val_loss_fixed} (lower is better)")
 
-    # -------- Part 2: Calculate and print goodness of fit metrics for fixed validation set  --------
+    # -------- Part 2: Calculate and print goodness
+    # of fit metrics for fixed validation set  --------
 
     mymetrics = gplike_calculate_mymetrics(
         pred_x_val_fixed,

@@ -1,25 +1,23 @@
+from .src import (
+    ANP,
+    AttentiveEncoder,
+    CNP,
+    DeterministicDecoder,
+    DeterministicEncoder,
+    LatentEncoder,
+    NP,
+)
 from .utils import (
     get_context_set,
     get_train_batch,
     gplike_calculate_mymetrics,
-    gplike_plot_functions,
     gplike_fixed_sets,
     gplike_new_sets,
+    gplike_plot_functions,
     gplike_val_step,
-    plot_2dimage,
     mnist_val_step,
+    plot_2dimage,
 )
-
-from .src import (
-    DeterministicEncoder,
-    LatentEncoder,
-    AttentiveEncoder,
-    DeterministicDecoder,
-    CNP,
-    NP,
-    ANP,
-)
-
 
 __version__ = "0.0.1"
 
