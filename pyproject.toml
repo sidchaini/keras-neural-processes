@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "keras_neural_processes"
+dynamic = ["version"]
+description = "A python package for a Keras 3 implementation of the neural process family: Conditional Neural Process, (Latent) Neural Process and Attentive Neural Process."
+readme = "README.md"
+requires-python = ">=3.10"
+license = {file = "LICENSE"}
+authors = [{name = "Siddharth Chaini", email = "sidchaini@gmail.com"}]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Education",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Operating System :: OS Independent"
+]
+dependencies = [
+    "numpy",
+    "keras",
+    "tensorflow",
+    "tensorflow_probability",
+]
+
+[tool.setuptools.dynamic]
+version = {attr = "keras_neural_processes.__version__"}
+
+[project.urls]
+Repository = "https://github.com/sidchaini/keras-neural-processes"

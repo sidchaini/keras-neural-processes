@@ -2,7 +2,7 @@
 # Visit https://bit.ly/cffinit to generate yours today!
 
 cff-version: 1.2.0
-title: keras-neuralprocesses
+title: keras-neural-processes
 message: >-
   If you use this software, please cite it using the
   metadata from this file.
@@ -17,7 +17,7 @@ authors:
     family-names: Bianco
     affiliation: University of Delaware
     orcid: 'https://orcid.org/0000-0003-1953-8727'
-repository-code: 'https://github.com/sidchaini/keras-neuralprocesses/'
+repository-code: 'https://github.com/sidchaini/keras-neural-processes/'
 abstract: >-
   Neural Processes written in Keras. Based on Keras 3 (using
   TF backend right now - plans to support PyTorch/Jax in the
