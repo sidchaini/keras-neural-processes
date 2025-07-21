@@ -1,0 +1,26 @@
+name: Linter
+
+on: [push, pull_request]    
+
+jobs:
+  blackflakedoc:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: psf/black@stable
+      with:
+        options: "--check --verbose"
+        src: "./keras_neural_processes"
+        jupyter: true
+        version: "~= 24.0"
+    - name: Run flake8
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.x'
+    - run: |
+        pip install flake8
+        flake8 --extend-ignore=E203,E701 --max-line-length 90 tests/ keras_neural_processes setup.py --show-source --statistics
+    # - name: Run pydocstyle
+    #   run: |
+    #     pip install pydocstyle
+    #     pydocstyle keras_neural_processes --convention=numpy
