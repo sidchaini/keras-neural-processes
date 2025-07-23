@@ -243,9 +243,16 @@ class DeterministicDecoder(layers.Layer):
         super().build(input_shape)
 
     def call(self, representation, target_x):
-        # Expand representation to match target batch size
-        # num_targets = ops.shape(target_x)[1]
-        # representation = ops.repeat(representation, num_targets, axis=1)
+        # Expand representation to match target batch size if needed
+        # Check if representation needs to be expanded (for CNP)
+        # or is already the right size (for NP and ANP)
+        rep_num_points = ops.shape(representation)[1]
+        target_num_points = ops.shape(target_x)[1]
+        
+        if rep_num_points == 1:
+            # CNP case: representation is (batch, 1, dim), needs expansion
+            representation = ops.repeat(representation, target_num_points, axis=1)
+        # Otherwise: NP/ANP case where representation is already (batch, target_points, dim)
 
         # Concatenate representation and target_x
         decoder_input = ops.concatenate([representation, target_x], axis=-1)
