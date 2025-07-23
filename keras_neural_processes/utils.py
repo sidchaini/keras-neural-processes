@@ -622,3 +622,38 @@ def mnist_val_step(model, X_val, y_val, num_context_range, epoch, seed):
     plt.tight_layout(rect=[0, 0.03, 1, 0.95])
     plt.show()
     plt.close()
+
+
+def get_context_set_optimized(
+    target_x,
+    target_y,
+    num_context,
+    num_context_mode="all",
+    seed=None,
+):
+    """
+    Optimized version of get_context_set using TensorFlow operations for better performance.
+    """
+    assert target_x.shape[:-1] == target_y.shape[:-1]
+    
+    if isinstance(num_context, (list, tuple)) and num_context_mode != "each":
+        raise ValueError(
+            "For a list-like collection of num_context, the mode must be 'each'."
+        )
+
+    # Use TensorFlow operations when possible for better performance
+    if tf.is_tensor(target_x) and num_context_mode == "all":
+        # Use tf.random.shuffle for better performance
+        n_points = tf.shape(target_x)[1]
+        
+        # Create indices and shuffle them
+        indices = tf.range(n_points)
+        shuffled_indices = tf.random.shuffle(indices, seed=seed)[:num_context]
+        
+        context_x = tf.gather(target_x, shuffled_indices, axis=1)
+        context_y = tf.gather(target_y, shuffled_indices, axis=1)
+        
+        return context_x, context_y
+    
+    # Fall back to original implementation for complex cases
+    return get_context_set(target_x, target_y, num_context, num_context_mode, seed)
