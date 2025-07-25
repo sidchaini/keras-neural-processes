@@ -36,4 +36,5 @@ history = model.train(
     plotcb=True,
     pbar=True,
     plot_every=plot_every,
-)```
+)
+```
