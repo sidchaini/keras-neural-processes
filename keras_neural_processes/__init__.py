@@ -8,6 +8,15 @@ from .src import (
     NP,
 )
 
+from .optimized import (
+    create_optimized_model,
+    configure_for_performance,
+)
+
+from .utils import (
+    get_context_set_optimized,
+)
+
 # from .utils import (
 #     get_context_set,
 #     get_train_batch,
@@ -39,4 +48,7 @@ __all__ = [
     "CNP",
     "NP",
     "ANP",
+    "create_optimized_model",
+    "configure_for_performance",
+    "get_context_set_optimized",
 ]
