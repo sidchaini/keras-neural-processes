@@ -245,7 +245,7 @@ class DeterministicDecoder(layers.Layer):
     def call(self, representation, target_x):
         # The representation should already be expanded to match the target batch size
         # when called from NP and ANP models
-        
+
         # Concatenate representation and target_x
         decoder_input = ops.concatenate([representation, target_x], axis=-1)
 
@@ -323,11 +323,13 @@ class CNP(keras.Model):
         representation = self.encoder(
             context_x, context_y
         )  # Get representation from encoder, shape: (batch, 1, dim)
-        
+
         # Expand representation to match the number of target points
         num_targets = ops.shape(target_x)[1]
-        representation = ops.repeat(representation, num_targets, axis=1)  # Shape: (batch, num_targets, dim)
-        
+        representation = ops.repeat(
+            representation, num_targets, axis=1
+        )  # Shape: (batch, num_targets, dim)
+
         mean, std = self.decoder(
             representation, target_x
         )  # Get predictions from decoder
