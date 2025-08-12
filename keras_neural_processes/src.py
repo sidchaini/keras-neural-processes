@@ -243,10 +243,6 @@ class DeterministicDecoder(layers.Layer):
         super().build(input_shape)
 
     def call(self, representation, target_x):
-        # Expand representation to match target batch size
-        # num_targets = ops.shape(target_x)[1]
-        # representation = ops.repeat(representation, num_targets, axis=1)
-
         # Concatenate representation and target_x
         decoder_input = ops.concatenate([representation, target_x], axis=-1)
 
@@ -324,6 +320,15 @@ class CNP(keras.Model):
         representation = self.encoder(
             context_x, context_y
         )  # Get representation from encoder
+
+        # Expand representation to match the number of target points
+        num_targets = ops.shape(target_x)[1]
+
+        representation = ops.broadcast_to(
+            representation,
+            (ops.shape(representation)[0], num_targets, ops.shape(representation)[-1]),
+        )  # Shape: (batch, num_targets, dim)
+
         mean, std = self.decoder(
             representation, target_x
         )  # Get predictions from decoder
@@ -544,12 +549,16 @@ class NP(keras.Model):
 
         # Expand z to match the number of target points
         num_targets = ops.shape(target_x)[1]
-        z_rep = ops.repeat(ops.expand_dims(z, axis=1), num_targets, axis=1)
+        z_rep = ops.broadcast_to(
+            ops.expand_dims(z, axis=1),
+            (ops.shape(z)[0], num_targets, ops.shape(z)[-1]),
+        )
 
         # --- Deterministic Path ---
         det_rep = self.det_encoder(context_x, context_y)  # Shape: (batch, 1, dim)
-        det_rep = ops.repeat(
-            det_rep, num_targets, axis=1
+        det_rep = ops.broadcast_to(
+            det_rep,
+            (ops.shape(det_rep)[0], num_targets, ops.shape(det_rep)[-1]),
         )  # Shape: (batch, num_targets, dim)
 
         # --- Combine and Decode ---
