@@ -18,8 +18,10 @@ class DeterministicEncoder(layers.Layer):
         super().__init__(**kwargs)
         self.hidden_sizes = hidden_sizes
         self.hidden_layers = []
+        self.activation = kwargs.get("activation", "relu")
+
         for size in hidden_sizes[:-1]:
-            self.hidden_layers.append(layers.Dense(size, activation="relu"))
+            self.hidden_layers.append(layers.Dense(size, activation=self.activation))
         # Final layer without activation
         self.hidden_layers.append(layers.Dense(hidden_sizes[-1]))
 
@@ -64,10 +66,11 @@ class LatentEncoder(layers.Layer):
         super().__init__(**kwargs)
         self.hidden_sizes = hidden_sizes
         self.num_latents = num_latents
+        self.activation = kwargs.get("activation", "relu")
 
         self.hidden_layers = []
         for size in hidden_sizes:
-            self.hidden_layers.append(layers.Dense(size, activation="relu"))
+            self.hidden_layers.append(layers.Dense(size, activation=self.activation))
 
         # Two final layers for mean and log_sigma
         self.mu_layer = layers.Dense(self.num_latents)
@@ -129,12 +132,15 @@ class AttentiveEncoder(layers.Layer):
         self.encoder_sizes = encoder_sizes
         self.num_heads = num_heads
         self.rep_dim = self.encoder_sizes[-1]  # The unified representation dimension
+        self.activation = kwargs.get("activation", "relu")
 
         # --- Sub-layers ---
         # 1. MLP to process each context point (x, y) individually
         self.context_mlp_hidden_layers = []
         for size in self.encoder_sizes[:-1]:
-            self.context_mlp_hidden_layers.append(layers.Dense(size, activation="relu"))
+            self.context_mlp_hidden_layers.append(
+                layers.Dense(size, activation=self.activation)
+            )
         self.context_mlp_final_layer = layers.Dense(self.rep_dim)
 
         # 2. Self-Attention over context points
@@ -219,10 +225,11 @@ class DeterministicDecoder(layers.Layer):
     def __init__(self, hidden_sizes=[128, 128, 2], **kwargs):
         super().__init__()
         self.hidden_sizes = hidden_sizes
-
         self.hidden_layers = []
+        self.activation = kwargs.get("activation", "relu")
+
         for size in hidden_sizes[:-1]:
-            self.hidden_layers.append(layers.Dense(size, activation="relu"))
+            self.hidden_layers.append(layers.Dense(size, activation=self.activation))
         # Final layer outputs mean and log_std
         self.hidden_layers.append(layers.Dense(hidden_sizes[-1]))
 
