@@ -5,38 +5,6 @@ import keras
 from keras_neural_processes import CNP, NP, ANP
 
 
-# Test fixtures for training
-@pytest.fixture
-def training_data():
-    """Generate sample training data."""
-    batch_size = 8
-    num_points = 40
-    x_dim = 1
-    y_dim = 1
-
-    # Generate function data
-    x = np.linspace(-2, 2, num_points).reshape(1, num_points, x_dim)
-    x = np.repeat(x, batch_size, axis=0)
-    y = np.sin(x * np.pi) + 0.1 * np.random.randn(batch_size, num_points, y_dim)
-
-    return x.astype(np.float32), y.astype(np.float32)
-
-
-@pytest.fixture
-def small_training_data():
-    """Generate smaller training data for faster tests."""
-    batch_size = 4
-    num_points = 20
-    x_dim = 1
-    y_dim = 1
-
-    x = np.linspace(-1, 1, num_points).reshape(1, num_points, x_dim)
-    x = np.repeat(x, batch_size, axis=0)
-    y = np.sin(x * np.pi * 2) + 0.05 * np.random.randn(batch_size, num_points, y_dim)
-
-    return x.astype(np.float32), y.astype(np.float32)
-
-
 class TestCNPTraining:
 
     def test_cnp_train_method_basic(self, small_training_data):

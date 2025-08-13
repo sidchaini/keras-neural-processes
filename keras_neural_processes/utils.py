@@ -47,16 +47,84 @@ def get_context_set(
         seed (int, optional): Seed for the random number generator.
 
     """
-    assert (
-        target_x.shape[:-1] == target_y.shape[:-1]
-    )  # the inputs should have same no. of samples and points, channels may differ
-    n_points = target_x.shape[1]
+
+    assert target_x.shape[:-1] == target_y.shape[:-1]
+    # the inputs should have same no. of samples and points, channels may differ
 
     if isinstance(num_context, (list, tuple)) and num_context_mode != "each":
         raise ValueError(
             "For a list-like collection of num_context, the mode must be 'each'."
         )
 
+    if tf.is_tensor(target_x) and tf.is_tensor(target_y) and num_context_mode == "all":
+        context_x, context_y = _get_context_set_tf(
+            target_x, target_y, num_context, seed
+        )
+    else:
+        context_x, context_y = _get_context_set_np(
+            target_x,
+            target_y,
+            num_context,
+            num_context_mode=num_context_mode,
+            seed=seed,
+        )
+
+    return context_x, context_y
+
+
+def _get_context_set_tf(
+    target_x,
+    target_y,
+    num_context,
+    seed=None,
+    # ADD SUPPORT FOR RANGE LATER - then sample different num
+    # context_frac_range=[0.01, 0.05],
+):
+    # Validate early (static when possible)
+    n_points_static = target_x.shape[1]
+    if (n_points_static is not None) and (num_context > n_points_static):
+        raise ValueError(
+            f"Requesting {num_context} context points but",
+            " only {n_points_static} available.",
+        )
+
+    n_points = tf.shape(target_x)[1]
+
+    # Runtime guard too (works under tf.function)
+    tf.debugging.assert_less_equal(
+        tf.cast(num_context, tf.int32),
+        n_points,
+        message="num_context exceeds number of points",
+    )
+
+    indices = tf.range(n_points)
+    if seed is not None:
+        seed_vec = tf.convert_to_tensor([seed, 0], dtype=tf.int32)
+        shuffled_indices = tf.random.experimental.stateless_shuffle(
+            indices, seed=seed_vec
+        )[:num_context]
+    else:
+        shuffled_indices = tf.random.shuffle(indices)[:num_context]
+
+    context_x = tf.gather(target_x, shuffled_indices, axis=1)
+    context_y = tf.gather(target_y, shuffled_indices, axis=1)
+
+    return context_x, context_y
+
+
+def _get_context_set_np(
+    target_x,
+    target_y,
+    num_context,
+    # either a single no. (total or each)
+    # or a list ([each1, each2 ...eachn])
+    # where n=#ofchannels aka np.unique(target_x[:,:,1])
+    num_context_mode="all",  # or "each"
+    seed=None,
+    # ADD SUPPORT FOR RANGE LATER - then sample different num
+    # context_frac_range=[0.01, 0.05],
+):
+    n_points = target_x.shape[1]
     # Convert to array if tensor
     target_x_np, target_y_np = ops.convert_to_numpy(target_x), ops.convert_to_numpy(
         target_y
