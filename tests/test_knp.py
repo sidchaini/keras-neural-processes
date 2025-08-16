@@ -6,10 +6,10 @@ from keras import ops
 
 import keras_neural_processes as knp
 from keras_neural_processes.src import (
-    DeterministicEncoder,
+    MeanEncoder,
     LatentEncoder,
     AttentiveEncoder,
-    DeterministicDecoder,
+    Decoder,
     CNP,
     NP,
     ANP,
@@ -151,10 +151,10 @@ class TestModelFunctionality:
 class TestLayers:
 
     def test_deterministic_encoder(self, context_target_data):
-        """Test DeterministicEncoder."""
+        """Test MeanEncoder."""
         context_x, context_y, _, _ = context_target_data
 
-        encoder = DeterministicEncoder(hidden_sizes=[64, 64, 32])
+        encoder = MeanEncoder(hidden_sizes=[64, 64, 32])
         encoder.build([context_x.shape, context_y.shape])
 
         representation = encoder(context_x, context_y)
@@ -204,7 +204,7 @@ class TestLayers:
         assert representation.shape == expected_shape
 
     def test_deterministic_decoder(self, context_target_data):
-        """Test DeterministicDecoder."""
+        """Test Decoder."""
         context_x, context_y, target_x, target_y = context_target_data
 
         # Create a dummy representation that matches target shape
@@ -215,7 +215,7 @@ class TestLayers:
             representation_dim,  # Same num_points as target
         ).astype(np.float32)
 
-        decoder = DeterministicDecoder(hidden_sizes=[32, 32, 2])
+        decoder = Decoder(hidden_sizes=[32, 32, 2])
         decoder.build([representation.shape, target_x.shape])
 
         mean, std = decoder(representation, target_x)
@@ -465,8 +465,8 @@ class TestModelSerialization:
 class TestLayerSerialization:
 
     def test_deterministic_encoder_config(self):
-        """Test DeterministicEncoder get_config method."""
-        encoder = DeterministicEncoder(hidden_sizes=[64, 32, 16])
+        """Test MeanEncoder get_config method."""
+        encoder = MeanEncoder(hidden_sizes=[64, 32, 16])
         config = encoder.get_config()
         assert config["hidden_sizes"] == [64, 32, 16]
 
@@ -485,8 +485,8 @@ class TestLayerSerialization:
         assert config["num_heads"] == 4
 
     def test_deterministic_decoder_config(self):
-        """Test DeterministicDecoder get_config method."""
-        decoder = DeterministicDecoder(hidden_sizes=[64, 32, 2])
+        """Test Decoder get_config method."""
+        decoder = Decoder(hidden_sizes=[64, 32, 2])
         config = decoder.get_config()
         assert config["hidden_sizes"] == [64, 32, 2]
 
