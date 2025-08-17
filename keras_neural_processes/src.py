@@ -199,13 +199,11 @@ class Decoder(layers.Layer):
             self.mlp_layers.append(layers.Dense(size, activation=self.activation))
 
         # Final layer outputs mean and log_std
-        if sizes[-1] != 2:
-            # assert sizes % 2 == 0
+        if self.sizes[-1] % 2 != 0:
             warnings.warn(
-                "Warning: Ideally the last layer size should be 2. "
-                "One neuron for mean, one neuron for std. "
-                "Please keep this in mind and proceed only if "
-                "you know what you are doing.",
+                "Warning: The last layer size of the decoder should be an even number, "
+                "as it's split into a mean and a standard deviation for each output "
+                f"dimension. Got size {self.sizes[-1]}.",
                 UserWarning,
             )
 
@@ -285,9 +283,9 @@ class BaseNeuralProcess(keras.Model):
     def _prepare_y(self, y, name="y"):
         """Validate and prepare a y tensor."""
         y = ops.convert_to_tensor(y, dtype="float32")
-        if len(y.shape) != 3 or y.shape[-1] != 1:
+        if len(y.shape) != 3 or y.shape[-1] != self.y_dims:
             raise ValueError(
-                f"{name} must have shape (num_samples, num_points, 1), "
+                f"{name} must have shape (num_samples, num_points, {self.y_dims}), "
                 f"but got {y.shape}."
             )
         return y
@@ -322,8 +320,9 @@ class BaseNeuralProcess(keras.Model):
 
         if not ops.all(ops.shape(context_x)[:2] == ops.shape(context_y)[:2]):
             raise ValueError(
-                "context_x and context_y must have the same number of samples and points, "
-                f"but got shapes {ops.shape(context_x)} and {ops.shape(context_y)}."
+                "context_x and context_y must have the same number of samples "
+                f"and points, but got shapes {ops.shape(context_x)} "
+                f"and {ops.shape(context_y)}."
             )
 
         return self.test_step(context_x, context_y, pred_x)

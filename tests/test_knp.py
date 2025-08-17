@@ -601,10 +601,62 @@ class TestDifferentDimensions:
 
         model = knp.CNP(y_dims=y_dim)
 
-        mean, std = model([context_x, context_y, target_x])
+        mean, std = model.predict(context_x, context_y, target_x)
 
         assert mean.shape == (batch_size, num_targets, y_dim)
         assert std.shape == (batch_size, num_targets, y_dim)
+
+    def test_multi_output_np(self):
+        """Test NP with multi-dimensional output."""
+        batch_size = 2
+        num_context = 5
+        num_targets = 10
+        x_dim = 1
+        y_dim = 3
+
+        context_x = np.random.randn(batch_size, num_context, x_dim).astype(np.float32)
+        context_y = np.random.randn(batch_size, num_context, y_dim).astype(np.float32)
+        target_x = np.random.randn(batch_size, num_targets, x_dim).astype(np.float32)
+        target_y = np.random.randn(batch_size, num_targets, y_dim).astype(np.float32)
+
+        model = knp.NP(y_dims=y_dim)
+        optimizer = keras.optimizers.Adam()
+        model.optimizer = optimizer
+
+        # Test predict
+        mean, std = model.predict(context_x, context_y, target_x)
+        assert mean.shape == (batch_size, num_targets, y_dim)
+        assert std.shape == (batch_size, num_targets, y_dim)
+
+        # Test train_step
+        logs = model.train_step(context_x, context_y, target_x, target_y)
+        assert "loss" in logs
+
+    def test_multi_output_anp(self):
+        """Test ANP with multi-dimensional output."""
+        batch_size = 2
+        num_context = 5
+        num_targets = 10
+        x_dim = 1
+        y_dim = 3
+
+        context_x = np.random.randn(batch_size, num_context, x_dim).astype(np.float32)
+        context_y = np.random.randn(batch_size, num_context, y_dim).astype(np.float32)
+        target_x = np.random.randn(batch_size, num_targets, x_dim).astype(np.float32)
+        target_y = np.random.randn(batch_size, num_targets, y_dim).astype(np.float32)
+
+        model = knp.ANP(y_dims=y_dim)
+        optimizer = keras.optimizers.Adam()
+        model.optimizer = optimizer
+
+        # Test predict
+        mean, std = model.predict(context_x, context_y, target_x)
+        assert mean.shape == (batch_size, num_targets, y_dim)
+        assert std.shape == (batch_size, num_targets, y_dim)
+
+        # Test train_step
+        logs = model.train_step(context_x, context_y, target_x, target_y)
+        assert "loss" in logs
 
     def test_multi_input_cnp(self):
         """Test CNP with multi-dimensional input."""
@@ -620,7 +672,7 @@ class TestDifferentDimensions:
 
         model = knp.CNP()
 
-        mean, std = model([context_x, context_y, target_x])
+        mean, std = model.predict(context_x, context_y, target_x)
 
         assert mean.shape == (batch_size, num_targets, y_dim)
         assert std.shape == (batch_size, num_targets, y_dim)
