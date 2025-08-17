@@ -3,12 +3,25 @@ import warnings
 import keras
 from keras import layers, ops
 from keras.utils import Progbar
-
 import tensorflow as tf
-
 import tensorflow_probability as tfp
 
 from . import utils
+
+
+# =============================================================================
+# 0. INPUT SIGNATURES
+# =============================================================================
+# Assuming long format, i.e.,
+# for x: (n_samples, n_points_total, 2)
+#       where 2 for [x_value, channel_id]
+# for y: (n_samples, n_points_total, 1)
+#       where 1 for [y_value]
+X_SPEC = tf.TensorSpec(shape=[None, None, 2], dtype="float32")
+Y_SPEC = tf.TensorSpec(shape=[None, None, 1], dtype="float32")
+
+TRAIN_SIGNATURE = [X_SPEC, Y_SPEC, X_SPEC, Y_SPEC]
+TEST_SIGNATURE = [X_SPEC, Y_SPEC, X_SPEC]
 
 
 # =============================================================================
@@ -16,16 +29,16 @@ from . import utils
 # =============================================================================
 @keras.saving.register_keras_serializable()
 class MeanEncoder(layers.Layer):
-    def __init__(self, hidden_sizes, **kwargs):
+    def __init__(self, sizes, **kwargs):
         super().__init__(**kwargs)
-        self.hidden_sizes = list(hidden_sizes)
+        self.sizes = list(sizes)
         self.activation = kwargs.get("activation", "relu")
         self.mlp_layers = []
 
-        for size in self.hidden_sizes[:-1]:
+        for size in self.sizes[:-1]:
             self.mlp_layers.append(layers.Dense(size, activation=self.activation))
         # Final layer without activation
-        self.mlp_layers.append(layers.Dense(hidden_sizes[-1]))
+        self.mlp_layers.append(layers.Dense(sizes[-1]))
 
     def call(self, context_x, context_y):
         # Concatenate x and y to create input features for each context point
@@ -43,21 +56,21 @@ class MeanEncoder(layers.Layer):
 
     def get_config(self):
         config = super().get_config()
-        config.update({"hidden_sizes": self.hidden_sizes})
+        config.update({"sizes": self.sizes})
         config.update({"activation": self.activation})
         return config
 
 
 @keras.saving.register_keras_serializable()
 class LatentEncoder(layers.Layer):
-    def __init__(self, hidden_sizes, num_latents, **kwargs):
+    def __init__(self, sizes, num_latents, **kwargs):
         super().__init__(**kwargs)
-        self.hidden_sizes = hidden_sizes
+        self.sizes = list(sizes)
         self.num_latents = num_latents
         self.activation = kwargs.get("activation", "relu")
         self.mlp_layers = []
 
-        for size in hidden_sizes:
+        for size in sizes:
             self.mlp_layers.append(layers.Dense(size, activation=self.activation))
         # Two final layers for mean and log_sigma
         self.mu_layer = layers.Dense(self.num_latents)
@@ -89,7 +102,7 @@ class LatentEncoder(layers.Layer):
         config = super().get_config()
         config.update(
             {
-                "hidden_sizes": self.hidden_sizes,
+                "sizes": self.sizes,
                 "num_latents": self.num_latents,
                 "activation": self.activation,
             }
@@ -176,28 +189,27 @@ class AttentiveEncoder(layers.Layer):
 
 @keras.saving.register_keras_serializable()
 class Decoder(layers.Layer):
-    def __init__(self, hidden_sizes, output_dims, **kwargs):
+    def __init__(self, sizes, **kwargs):
         super().__init__(**kwargs)
-        self.hidden_sizes = list(hidden_sizes)
-        self.output_dims = output_dims
+        self.sizes = list(sizes)
         self.activation = kwargs.get("activation", "relu")
         self.mlp_layers = []
 
-        for size in hidden_sizes[:-1]:
+        for size in self.sizes[:-1]:
             self.mlp_layers.append(layers.Dense(size, activation=self.activation))
 
         # Final layer outputs mean and log_std
-        if hidden_sizes[-1] != 2:
-            # assert hidden_sizes % 2 == 0
+        if sizes[-1] != 2:
+            # assert sizes % 2 == 0
             warnings.warn(
                 "Warning: Ideally the last layer size should be 2. "
                 "One neuron for mean, one neuron for std. "
-                "Please keep this in mind and proceed only if ",
+                "Please keep this in mind and proceed only if "
                 "you know what you are doing.",
                 UserWarning,
             )
 
-        self.mlp_layers.append(layers.Dense(hidden_sizes[-1]))
+        self.mlp_layers.append(layers.Dense(self.sizes[-1]))
 
     def call(self, representation, target_x):
         # Concatenate representation and target_x
@@ -218,9 +230,7 @@ class Decoder(layers.Layer):
 
     def get_config(self):
         config = super().get_config()
-        config.update(
-            {"hidden_sizes": self.hidden_sizes, "activation": self.activation}
-        )
+        config.update({"sizes": self.sizes, "activation": self.activation})
         return config
 
 
@@ -242,6 +252,82 @@ class BaseNeuralProcess(keras.Model):
     - `test_step(self, ...)`: To define the inference logic.
     """
 
+    def _prepare_x(self, X, name="X"):
+        """
+        Validate and prepare an X tensor.
+        Handles optional 1D to 2D conversion.
+        """
+        X = ops.convert_to_tensor(X, dtype="float32")
+        if len(X.shape) != 3:
+            raise ValueError(
+                f"{name} must be a 3D tensor, but got {len(X.shape)} dims."
+            )
+
+        if X.shape[-1] == 1:
+            warnings.warn(
+                f"Input '{name}' has shape {X.shape}, suggesting 1D x-values. "
+                "It will be automatically reshaped to (..., 2) by adding a "
+                "default channel ID of 0 for all points. If this is not the "
+                "intended behavior, please reshape your data manually.",
+                UserWarning,
+            )
+            # Add a channel of zeros
+            zeros = ops.zeros_like(X)
+            X = ops.concatenate([X, zeros], axis=-1)
+
+        if X.shape[-1] != 2:
+            raise ValueError(
+                f"{name} must have shape (..., 2) at the last dimension, "
+                f"but got shape {X.shape}."
+            )
+        return X
+
+    def _prepare_y(self, y, name="y"):
+        """Validate and prepare a y tensor."""
+        y = ops.convert_to_tensor(y, dtype="float32")
+        if len(y.shape) != 3 or y.shape[-1] != 1:
+            raise ValueError(
+                f"{name} must have shape (num_samples, num_points, 1), "
+                f"but got {y.shape}."
+            )
+        return y
+
+    def _validate_data_shapes(self, X, y, name="train"):
+        """Helper to validate the shape of the input data."""
+        X = self._prepare_x(X, name=f"X_{name}")
+        y = self._prepare_y(y, name=f"y_{name}")
+
+        if not ops.all(ops.shape(X)[:2] == ops.shape(y)[:2]):
+            raise ValueError(
+                f"X_{name} and y_{name} must have the same number of samples and points, "
+                f"but got {ops.shape(X)[:2]} and {ops.shape(y)[:2]}."
+            )
+        return X, y
+
+    def predict(self, context_x, context_y, pred_x):
+        """
+        Make predictions with the Neural Process.
+
+        Args:
+            context_x: Context points, x-values.
+            context_y: Context points, y-values.
+            pred_x: Target points for prediction, x-values.
+
+        Returns:
+            A tuple of (mean, std) for the predictions.
+        """
+        context_x = self._prepare_x(context_x, name="context_x")
+        context_y = self._prepare_y(context_y, name="context_y")
+        pred_x = self._prepare_x(pred_x, name="pred_x")
+
+        if not ops.all(ops.shape(context_x)[:2] == ops.shape(context_y)[:2]):
+            raise ValueError(
+                "context_x and context_y must have the same number of samples and points, "
+                f"but got shapes {ops.shape(context_x)} and {ops.shape(context_y)}."
+            )
+
+        return self.test_step(context_x, context_y, pred_x)
+
     def train(
         self,
         X_train,
@@ -260,6 +346,10 @@ class BaseNeuralProcess(keras.Model):
         pred_points=None,
         seed_val=None,
     ):
+        X_train, y_train = self._validate_data_shapes(X_train, y_train, name="train")
+        if X_val is not None and y_val is not None:
+            X_val, y_val = self._validate_data_shapes(X_val, y_val, name="val")
+
         self.optimizer = optimizer
 
         if pbar:
@@ -332,12 +422,7 @@ class ConditionalModelMixin:
     # and for y: (n_samples, n_points_total, 1) where 1 for [y_value]
     @tf.function(
         jit_compile=True,
-        input_signature=[
-            tf.TensorSpec(shape=[None, None, 2], dtype=tf.float32),  # context_x
-            tf.TensorSpec(shape=[None, None, 1], dtype=tf.float32),  # context_y
-            tf.TensorSpec(shape=[None, None, 2], dtype=tf.float32),  # target_x
-            tf.TensorSpec(shape=[None, None, 1], dtype=tf.float32),  # target_y
-        ],
+        input_signature=TRAIN_SIGNATURE,
     )
     def train_step(self, context_x, context_y, target_x, target_y):
         with tf.GradientTape() as tape:
@@ -355,11 +440,7 @@ class ConditionalModelMixin:
     # and for y: (n_samples, n_points_total, 1) where 1 for [y_value]
     @tf.function(
         jit_compile=True,
-        input_signature=[
-            tf.TensorSpec(shape=[None, None, 2], dtype=tf.float32),  # context_x
-            tf.TensorSpec(shape=[None, None, 1], dtype=tf.float32),  # context_y
-            tf.TensorSpec(shape=[None, None, 2], dtype=tf.float32),  # pred_x
-        ],
+        input_signature=TEST_SIGNATURE,
     )
     def test_step(self, context_x, context_y, pred_x):
         mean, std = self((context_x, context_y, pred_x), training=False)
@@ -378,12 +459,7 @@ class LatentModelMixin:
     # and for y: (n_samples, n_points_total, 1) where 1 for [y_value]
     @tf.function(
         jit_compile=True,
-        input_signature=[
-            tf.TensorSpec(shape=[None, None, 2], dtype=tf.float32),  # context_x
-            tf.TensorSpec(shape=[None, None, 1], dtype=tf.float32),  # context_y
-            tf.TensorSpec(shape=[None, None, 2], dtype=tf.float32),  # target_x
-            tf.TensorSpec(shape=[None, None, 1], dtype=tf.float32),  # target_y
-        ],
+        input_signature=TRAIN_SIGNATURE,
     )
     def train_step(self, context_x, context_y, target_x, target_y):
         with tf.GradientTape() as tape:
@@ -420,11 +496,7 @@ class LatentModelMixin:
     # and for y: (n_samples, n_points_total, 1) where 1 for [y_value]
     @tf.function(
         jit_compile=True,
-        input_signature=[
-            tf.TensorSpec(shape=[None, None, 2], dtype=tf.float32),  # context_x
-            tf.TensorSpec(shape=[None, None, 1], dtype=tf.float32),  # context_y
-            tf.TensorSpec(shape=[None, None, 2], dtype=tf.float32),  # pred_x
-        ],
+        input_signature=TEST_SIGNATURE,
     )
     def test_step(self, context_x, context_y, pred_x):
         # At test time, we don't have target_y. The `call` method will
@@ -439,20 +511,29 @@ class LatentModelMixin:
 
 
 @keras.saving.register_keras_serializable()
-class CNP(BaseNeuralProcess):
+class CNP(ConditionalModelMixin, BaseNeuralProcess):
     """
     Conditional Neural Process (CNP).
     A deterministic model that uses a mean-aggregated representation.
     """
 
-    def __init__(self, encoder_sizes, decoder_sizes, output_dims, **kwargs):
+    def __init__(
+        self,
+        encoder_sizes=[128, 128, 128, 128],
+        decoder_sizes=[128, 128],
+        y_dims=1,
+        **kwargs,
+    ):
         super().__init__(**kwargs)
         self.encoder_sizes = list(encoder_sizes)
+        self.y_dims = y_dims
         self.decoder_sizes = list(decoder_sizes)
-        self.output_dims = output_dims
+        full_decoder_sizes = self.decoder_sizes + [
+            2 * self.y_dims
+        ]  # adding 2 per dim: mu and sigma
 
         self.encoder = MeanEncoder(self.encoder_sizes)
-        self.decoder = Decoder(self.decoder_sizes, self.output_dims)
+        self.decoder = Decoder(full_decoder_sizes)
 
     def call(self, inputs, training=False):
         context_x, context_y, target_x = inputs
@@ -474,7 +555,7 @@ class CNP(BaseNeuralProcess):
             {
                 "encoder_sizes": self.encoder_sizes,
                 "decoder_sizes": self.decoder_sizes,
-                "output_dims": self.output_dims,
+                "y_dims": self.y_dims,
             }
         )
         return config
@@ -490,23 +571,26 @@ class NP(LatentModelMixin, BaseNeuralProcess):
 
     def __init__(
         self,
-        det_encoder_sizes,
-        latent_encoder_sizes,
-        num_latents,
-        decoder_sizes,
-        output_dims,
+        det_encoder_sizes=[128, 128, 128, 128],
+        latent_encoder_sizes=[128, 128],
+        num_latents=128,
+        decoder_sizes=[128, 128],
+        y_dims=1,
         **kwargs,
     ):
         super().__init__(**kwargs)
         self.det_encoder_sizes = list(det_encoder_sizes)
         self.latent_encoder_sizes = list(latent_encoder_sizes)
         self.num_latents = num_latents
+        self.y_dims = y_dims
         self.decoder_sizes = list(decoder_sizes)
-        self.output_dims = output_dims
+        full_decoder_sizes = self.decoder_sizes + [
+            2 * self.y_dims
+        ]  # adding 2 per dim: mu and sigma
 
         self.det_encoder = MeanEncoder(self.det_encoder_sizes)
         self.latent_encoder = LatentEncoder(self.latent_encoder_sizes, self.num_latents)
-        self.decoder = Decoder(self.decoder_sizes, self.output_dims)
+        self.decoder = Decoder(full_decoder_sizes)
 
     def call(self, inputs, training=False):
         context_x, context_y, target_x, target_y = inputs
@@ -544,7 +628,7 @@ class NP(LatentModelMixin, BaseNeuralProcess):
                 "latent_encoder_sizes": self.latent_encoder_sizes,
                 "num_latents": self.num_latents,
                 "decoder_sizes": self.decoder_sizes,
-                "output_dims": self.output_dims,
+                "y_dims": self.y_dims,
             }
         )
         return config
@@ -560,12 +644,12 @@ class ANP(LatentModelMixin, BaseNeuralProcess):
 
     def __init__(
         self,
-        att_encoder_sizes,
-        num_heads,
-        latent_encoder_sizes,
-        num_latents,
-        decoder_sizes,
-        output_dims,
+        att_encoder_sizes=[128, 128, 128, 128],
+        num_heads=8,
+        latent_encoder_sizes=[128, 128],
+        num_latents=128,
+        decoder_sizes=[128, 128],
+        y_dims=1,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -573,12 +657,16 @@ class ANP(LatentModelMixin, BaseNeuralProcess):
         self.num_heads = num_heads
         self.latent_encoder_sizes = list(latent_encoder_sizes)
         self.num_latents = num_latents
+        self.y_dims = y_dims
+
         self.decoder_sizes = list(decoder_sizes)
-        self.output_dims = output_dims
+        full_decoder_sizes = self.decoder_sizes + [
+            2 * self.y_dims
+        ]  # adding 2 per dim: mu and sigma
 
         self.att_encoder = AttentiveEncoder(self.att_encoder_sizes, self.num_heads)
         self.latent_encoder = LatentEncoder(self.latent_encoder_sizes, self.num_latents)
-        self.decoder = Decoder(self.decoder_sizes, self.output_dims)
+        self.decoder = Decoder(full_decoder_sizes)
 
     def call(self, inputs, training=False):
         context_x, context_y, target_x, target_y = inputs
@@ -616,7 +704,7 @@ class ANP(LatentModelMixin, BaseNeuralProcess):
                 "latent_encoder_sizes": self.latent_encoder_sizes,
                 "num_latents": self.num_latents,
                 "decoder_sizes": self.decoder_sizes,
-                "output_dims": self.output_dims,
+                "y_dims": self.y_dims,
             }
         )
         return config

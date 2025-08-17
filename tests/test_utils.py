@@ -3,7 +3,7 @@ import pytest
 import tensorflow as tf
 from keras import ops
 
-from keras_neural_processes import utils
+import keras_neural_processes as knp
 
 
 class TestContextSetGeneration:
@@ -13,7 +13,7 @@ class TestContextSetGeneration:
         x, y = sample_gp_data
         num_context = 10
 
-        context_x, context_y = utils.get_context_set(
+        context_x, context_y = knp.utils.get_context_set(
             x, y, num_context=num_context, num_context_mode="all"
         )
 
@@ -34,7 +34,7 @@ class TestContextSetGeneration:
         x, y = multi_channel_gp_data
         num_context = 5
 
-        context_x, context_y = utils.get_context_set(
+        context_x, context_y = knp.utils.get_context_set(
             x, y, num_context=num_context, num_context_mode="each"
         )
 
@@ -58,7 +58,7 @@ class TestContextSetGeneration:
         x, y = multi_channel_gp_data
         num_context = [3, 5, 7]  # Different for each channel
 
-        context_x, context_y = utils.get_context_set(
+        context_x, context_y = knp.utils.get_context_set(
             x, y, num_context=num_context, num_context_mode="each"
         )
 
@@ -72,11 +72,11 @@ class TestContextSetGeneration:
         num_context = 10
         seed = 42
 
-        context_x1, context_y1 = utils.get_context_set(
+        context_x1, context_y1 = knp.utils.get_context_set(
             x, y, num_context=num_context, num_context_mode="all", seed=seed
         )
 
-        context_x2, context_y2 = utils.get_context_set(
+        context_x2, context_y2 = knp.utils.get_context_set(
             x, y, num_context=num_context, num_context_mode="all", seed=seed
         )
 
@@ -89,17 +89,17 @@ class TestContextSetGeneration:
 
         # Test invalid mode
         with pytest.raises(AttributeError):
-            utils.get_context_set(x, y, num_context=10, num_context_mode="invalid")
+            knp.utils.get_context_set(x, y, num_context=10, num_context_mode="invalid")
 
         # Test requesting too many points
         with pytest.raises(ValueError):
-            utils.get_context_set(
+            knp.utils.get_context_set(
                 x, y, num_context=x.shape[1] + 10, num_context_mode="all"
             )
 
         # Test list with wrong mode
         with pytest.raises(ValueError):
-            utils.get_context_set(x, y, num_context=[5, 10], num_context_mode="all")
+            knp.utils.get_context_set(x, y, num_context=[5, 10], num_context_mode="all")
 
 
 class TestTrainBatchGeneration:
@@ -109,7 +109,7 @@ class TestTrainBatchGeneration:
         x, y = sample_gp_data
         batch_size = 2
 
-        x_batch, y_batch = utils.get_train_batch(x, y, batch_size=batch_size)
+        x_batch, y_batch = knp.utils.get_train_batch(x, y, batch_size=batch_size)
 
         assert x_batch.shape == (batch_size, x.shape[1], x.shape[2])
         assert y_batch.shape == (batch_size, y.shape[1], y.shape[2])
@@ -122,7 +122,7 @@ class TestTrainBatchGeneration:
         x_tf = tf.constant(x)
         y_tf = tf.constant(y)
 
-        x_batch, y_batch = utils.get_train_batch(x_tf, y_tf, batch_size=batch_size)
+        x_batch, y_batch = knp.utils.get_train_batch(x_tf, y_tf, batch_size=batch_size)
 
         assert isinstance(x_batch, tf.Tensor)
         assert isinstance(y_batch, tf.Tensor)
@@ -142,7 +142,7 @@ class TestTrainBatchGeneration:
         with pytest.raises(
             ValueError, match="Cannot take a larger sample than population"
         ):
-            utils.get_train_batch(x, y, batch_size=batch_size)
+            knp.utils.get_train_batch(x, y, batch_size=batch_size)
 
 
 class TestNumContextSampling:
@@ -152,7 +152,7 @@ class TestNumContextSampling:
         num_context_range = [5, 15]
 
         for _ in range(10):  # Test multiple times for randomness
-            sampled = utils._sample_num_context(num_context_range)
+            sampled = knp.utils._sample_num_context(num_context_range)
             assert isinstance(sampled, (int, np.integer))
             assert 5 <= sampled <= 15
 
@@ -161,7 +161,7 @@ class TestNumContextSampling:
         per_channel_range = [[3, 7], [10, 15], [5, 8]]
 
         for _ in range(10):
-            sampled = utils._sample_num_context(per_channel_range)
+            sampled = knp.utils._sample_num_context(per_channel_range)
             assert isinstance(sampled, list)
             assert len(sampled) == 3
             assert 3 <= sampled[0] <= 7
@@ -171,28 +171,28 @@ class TestNumContextSampling:
     def test_get_fixed_num_context_simple_range(self):
         """Test _get_fixed_num_context with simple range."""
         num_context_range = [4, 10]  # Mean should be 7
-        fixed = utils._get_fixed_num_context(num_context_range)
+        fixed = knp.utils._get_fixed_num_context(num_context_range)
         assert fixed == 7
 
     def test_get_fixed_num_context_per_channel_range(self):
         """Test _get_fixed_num_context with per-channel ranges."""
         per_channel_range = [[4, 6], [8, 12], [3, 7]]  # Means: [5, 10, 5]
-        fixed = utils._get_fixed_num_context(per_channel_range)
+        fixed = knp.utils._get_fixed_num_context(per_channel_range)
         assert fixed == [5, 10, 5]
 
     def test_is_per_channel_range_detection(self):
         """Test _is_per_channel_range detection function."""
         # Simple range (not per-channel)
-        assert not utils._is_per_channel_range([5, 10])
+        assert not knp.utils._is_per_channel_range([5, 10])
 
         # Per-channel format
-        assert utils._is_per_channel_range([[5, 10], [3, 8]])
-        assert utils._is_per_channel_range([[1, 2], [3, 4], [5, 6]])
+        assert knp.utils._is_per_channel_range([[5, 10], [3, 8]])
+        assert knp.utils._is_per_channel_range([[1, 2], [3, 4], [5, 6]])
 
         # Empty or invalid formats
-        assert not utils._is_per_channel_range([])
-        assert not utils._is_per_channel_range([5, [3, 8]])  # Mixed format
-        assert not utils._is_per_channel_range("invalid")
+        assert not knp.utils._is_per_channel_range([])
+        assert not knp.utils._is_per_channel_range([5, [3, 8]])  # Mixed format
+        assert not knp.utils._is_per_channel_range("invalid")
 
 
 class TestMetricsCalculation:
@@ -207,11 +207,11 @@ class TestMetricsCalculation:
         pred_y_std = 0.1 * np.ones_like(y)  # Small uncertainty
 
         # Get context set
-        context_x, context_y = utils.get_context_set(
+        context_x, context_y = knp.utils.get_context_set(
             x, y, num_context=10, num_context_mode="all"
         )
 
-        metrics = utils.gplike_calculate_mymetrics(
+        metrics = knp.utils.gplike_calculate_mymetrics(
             pred_x, pred_y_mean, pred_y_std, x, y, context_x, context_y  # target
         )
 
@@ -242,11 +242,11 @@ class TestMetricsCalculation:
         pred_y_mean = y  # Exact match
         pred_y_std = 0.001 * np.ones_like(y)  # Very small uncertainty
 
-        context_x, context_y = utils.get_context_set(
+        context_x, context_y = knp.utils.get_context_set(
             x, y, num_context=10, num_context_mode="all"
         )
 
-        metrics = utils.gplike_calculate_mymetrics(
+        metrics = knp.utils.gplike_calculate_mymetrics(
             pred_x,
             pred_y_mean,
             pred_y_std,
@@ -271,12 +271,12 @@ class TestMetricsCalculation:
         pred_y_mean = y + 0.2 * np.random.randn(*y.shape)
         pred_y_std = 0.3 * np.ones_like(y)
 
-        context_x, context_y = utils.get_context_set(
+        context_x, context_y = knp.utils.get_context_set(
             x, y, num_context=10, num_context_mode="all"
         )
 
         # Test with different closeness threshold
-        metrics1 = utils.gplike_calculate_mymetrics(
+        metrics1 = knp.utils.gplike_calculate_mymetrics(
             pred_x,
             pred_y_mean,
             pred_y_std,
@@ -287,7 +287,7 @@ class TestMetricsCalculation:
             closeness_thresh=0.05,  # Stricter threshold
         )
 
-        metrics2 = utils.gplike_calculate_mymetrics(
+        metrics2 = knp.utils.gplike_calculate_mymetrics(
             pred_x,
             pred_y_mean,
             pred_y_std,
@@ -318,7 +318,7 @@ class TestValidationUtilities:
             target_x_fixed,
             target_y_fixed,
             pred_x_fixed,
-        ) = utils.gplike_fixed_sets(
+        ) = knp.utils.gplike_fixed_sets(
             x, y, pred_points, seed, fixed_val_num_context, num_context_mode
         )
 
@@ -330,7 +330,7 @@ class TestValidationUtilities:
         assert pred_x_fixed.shape == x.shape  # Should be same as target_x
 
         # Check reproducibility with same seed
-        (context_x_fixed2, context_y_fixed2, _, _, _) = utils.gplike_fixed_sets(
+        (context_x_fixed2, context_y_fixed2, _, _, _) = knp.utils.gplike_fixed_sets(
             x, y, pred_points, seed, fixed_val_num_context, num_context_mode
         )
 
@@ -344,7 +344,7 @@ class TestValidationUtilities:
         num_context_range = [5, 15]
         num_context_mode = "all"
 
-        (context_x, context_y, target_x, target_y, pred_x) = utils.gplike_new_sets(
+        (context_x, context_y, target_x, target_y, pred_x) = knp.utils.gplike_new_sets(
             x, y, pred_points, num_context_range, num_context_mode
         )
 
@@ -367,10 +367,10 @@ class TestTensorCompatibility:
         seed = 42  # Use same seed for reproducible results
 
         # Numpy path reproducibility
-        cx1_np, cy1_np = utils.get_context_set(
+        cx1_np, cy1_np = knp.utils.get_context_set(
             x, y, num_context=num_context, num_context_mode="all", seed=seed
         )
-        cx2_np, cy2_np = utils.get_context_set(
+        cx2_np, cy2_np = knp.utils.get_context_set(
             x, y, num_context=num_context, num_context_mode="all", seed=seed
         )
         assert isinstance(cx1_np, np.ndarray) and isinstance(cy1_np, np.ndarray)
@@ -381,10 +381,10 @@ class TestTensorCompatibility:
         x_tf = tf.constant(x)
         y_tf = tf.constant(y)
 
-        cx1_tf, cy1_tf = utils.get_context_set(
+        cx1_tf, cy1_tf = knp.utils.get_context_set(
             x_tf, y_tf, num_context=num_context, num_context_mode="all", seed=seed
         )
-        cx2_tf, cy2_tf = utils.get_context_set(
+        cx2_tf, cy2_tf = knp.utils.get_context_set(
             x_tf, y_tf, num_context=num_context, num_context_mode="all", seed=seed
         )
         assert isinstance(cx1_tf, tf.Tensor) and isinstance(cy1_tf, tf.Tensor)

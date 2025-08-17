@@ -5,35 +5,25 @@ import keras
 from keras import ops
 
 import keras_neural_processes as knp
-from keras_neural_processes.src import (
-    MeanEncoder,
-    LatentEncoder,
-    AttentiveEncoder,
-    Decoder,
-    CNP,
-    NP,
-    ANP,
-)
-from keras_neural_processes import utils
 
 
 # Tests for basic model instantiation
 def test_CNP():
     model = knp.CNP()
     assert model is not None
-    assert isinstance(model, CNP)
+    assert isinstance(model, knp.CNP)
 
 
 def test_NP():
     model = knp.NP()
     assert model is not None
-    assert isinstance(model, NP)
+    assert isinstance(model, knp.NP)
 
 
 def test_ANP():
     model = knp.ANP()
     assert model is not None
-    assert isinstance(model, ANP)
+    assert isinstance(model, knp.ANP)
 
 
 # Tests for model configuration and instantiation with custom parameters
@@ -41,42 +31,42 @@ class TestModelInstantiation:
 
     def test_cnp_custom_params(self):
         """Test CNP with custom parameters."""
-        model = CNP(encoder_sizes=[64, 64], decoder_sizes=[32, 32], output_dims=2)
+        model = knp.CNP(encoder_sizes=[64, 64], decoder_sizes=[32, 32], y_dims=2)
         assert model.encoder_sizes == [64, 64]
-        assert model.decoder_sizes_hidden == [32, 32]
-        assert model.output_dims == 2
+        assert model.decoder_sizes == [32, 32]
+        assert model.y_dims == 2
 
     def test_np_custom_params(self):
         """Test NP with custom parameters."""
-        model = NP(
+        model = knp.NP(
             det_encoder_sizes=[64, 64],
             latent_encoder_sizes=[32, 32],
             num_latents=64,
             decoder_sizes=[16, 16],
-            output_dims=2,
+            y_dims=2,
         )
         assert model.det_encoder_sizes == [64, 64]
         assert model.latent_encoder_sizes == [32, 32]
         assert model.num_latents == 64
-        assert model.decoder_sizes_hidden == [16, 16]
-        assert model.output_dims == 2
+        assert model.decoder_sizes == [16, 16]
+        assert model.y_dims == 2
 
     def test_anp_custom_params(self):
         """Test ANP with custom parameters."""
-        model = ANP(
-            encoder_sizes=[64, 64],
+        model = knp.ANP(
+            att_encoder_sizes=[64, 64],
             num_heads=4,
             latent_encoder_sizes=[32, 32],
             num_latents=64,
             decoder_sizes=[16, 16],
-            output_dims=2,
+            y_dims=2,
         )
-        assert model.encoder_sizes == [64, 64]
+        assert model.att_encoder_sizes == [64, 64]
         assert model.num_heads == 4
         assert model.latent_encoder_sizes == [32, 32]
         assert model.num_latents == 64
-        assert model.decoder_sizes_hidden == [16, 16]
-        assert model.output_dims == 2
+        assert model.decoder_sizes == [16, 16]
+        assert model.y_dims == 2
 
 
 # Tests for model building and forward passes
@@ -86,10 +76,7 @@ class TestModelFunctionality:
         """Test CNP build and forward pass."""
         context_x, context_y, target_x, target_y = context_target_data
 
-        model = CNP()
-
-        # Build the model
-        model.build([context_x.shape, context_y.shape, target_x.shape])
+        model = knp.CNP()
 
         # Forward pass
         mean, std = model([context_x, context_y, target_x])
@@ -102,10 +89,7 @@ class TestModelFunctionality:
         """Test NP build and forward pass."""
         context_x, context_y, target_x, target_y = context_target_data
 
-        model = NP()
-
-        # Build the model
-        model.build([context_x.shape, context_y.shape, target_x.shape, target_y.shape])
+        model = knp.NP()
 
         # Forward pass during training
         pred_dist, prior_dist, posterior_dist = model(
@@ -131,10 +115,7 @@ class TestModelFunctionality:
         """Test ANP build and forward pass."""
         context_x, context_y, target_x, target_y = context_target_data
 
-        model = ANP()
-
-        # Build the model
-        model.build([context_x.shape, context_y.shape, target_x.shape, target_y.shape])
+        model = knp.ANP()
 
         # Forward pass during training
         pred_dist, prior_dist, posterior_dist = model(
@@ -154,7 +135,7 @@ class TestLayers:
         """Test MeanEncoder."""
         context_x, context_y, _, _ = context_target_data
 
-        encoder = MeanEncoder(hidden_sizes=[64, 64, 32])
+        encoder = knp.MeanEncoder(sizes=[64, 64, 32])
         encoder.build([context_x.shape, context_y.shape])
 
         representation = encoder(context_x, context_y)
@@ -166,7 +147,7 @@ class TestLayers:
         """Test LatentEncoder."""
         context_x, context_y, _, _ = context_target_data
 
-        encoder = LatentEncoder(hidden_sizes=[64, 64], num_latents=32)
+        encoder = knp.LatentEncoder(sizes=[64, 64], num_latents=32)
         encoder.build([context_x.shape, context_y.shape])
 
         distribution = encoder(context_x, context_y)
@@ -191,7 +172,7 @@ class TestLayers:
         """Test AttentiveEncoder."""
         context_x, context_y, target_x, _ = context_target_data
 
-        encoder = AttentiveEncoder(encoder_sizes=[64, 64, 32], num_heads=4)
+        encoder = knp.AttentiveEncoder(encoder_sizes=[64, 64, 32], num_heads=4)
         encoder.build([context_x.shape, context_y.shape, target_x.shape])
 
         representation = encoder(context_x, context_y, target_x)
@@ -215,7 +196,7 @@ class TestLayers:
             representation_dim,  # Same num_points as target
         ).astype(np.float32)
 
-        decoder = Decoder(hidden_sizes=[32, 32, 2])
+        decoder = knp.Decoder(sizes=[32, 32, 2])
         decoder.build([representation.shape, target_x.shape])
 
         mean, std = decoder(representation, target_x)
@@ -233,7 +214,7 @@ class TestUtilityFunctions:
         x, y = sample_data_1d
         num_context = 15
 
-        context_x, context_y = utils.get_context_set(
+        context_x, context_y = knp.utils.get_context_set(
             x, y, num_context=num_context, num_context_mode="all"
         )
 
@@ -245,7 +226,7 @@ class TestUtilityFunctions:
         x, y = sample_data_multi_channel
         num_context = 10
 
-        context_x, context_y = utils.get_context_set(
+        context_x, context_y = knp.utils.get_context_set(
             x, y, num_context=num_context, num_context_mode="each"
         )
 
@@ -259,7 +240,7 @@ class TestUtilityFunctions:
         x, y = sample_data_multi_channel
         num_context = [5, 8]  # Different numbers for each channel
 
-        context_x, context_y = utils.get_context_set(
+        context_x, context_y = knp.utils.get_context_set(
             x, y, num_context=num_context, num_context_mode="each"
         )
 
@@ -272,7 +253,7 @@ class TestUtilityFunctions:
         x, y = sample_data_1d
         batch_size = 2
 
-        x_batch, y_batch = utils.get_train_batch(x, y, batch_size=batch_size)
+        x_batch, y_batch = knp.utils.get_train_batch(x, y, batch_size=batch_size)
 
         assert x_batch.shape == (batch_size, x.shape[1], x.shape[2])
         assert y_batch.shape == (batch_size, y.shape[1], y.shape[2])
@@ -281,13 +262,13 @@ class TestUtilityFunctions:
         """Test _sample_num_context function."""
         # Test simple range
         num_context_range = [5, 10]
-        sampled = utils._sample_num_context(num_context_range)
+        sampled = knp.utils._sample_num_context(num_context_range)
         assert isinstance(sampled, (int, np.integer))
         assert 5 <= sampled <= 10
 
         # Test per-channel range
         per_channel_range = [[3, 5], [7, 10]]
-        sampled = utils._sample_num_context(per_channel_range)
+        sampled = knp.utils._sample_num_context(per_channel_range)
         assert isinstance(sampled, list)
         assert len(sampled) == 2
         assert 3 <= sampled[0] <= 5
@@ -297,12 +278,12 @@ class TestUtilityFunctions:
         """Test _get_fixed_num_context function."""
         # Test simple range
         num_context_range = [5, 11]  # Mean should be 8
-        fixed = utils._get_fixed_num_context(num_context_range)
+        fixed = knp.utils._get_fixed_num_context(num_context_range)
         assert fixed == 8
 
         # Test per-channel range
         per_channel_range = [[3, 5], [7, 11]]  # Means should be [4, 9]
-        fixed = utils._get_fixed_num_context(per_channel_range)
+        fixed = knp.utils._get_fixed_num_context(per_channel_range)
         assert fixed == [4, 9]
 
 
@@ -313,36 +294,33 @@ class TestTrainingMethods:
         """Test CNP train_step method."""
         context_x, context_y, target_x, target_y = context_target_data
 
-        model = CNP()
-        model.build([context_x.shape, context_y.shape, target_x.shape])
+        model = knp.CNP()
 
         optimizer = keras.optimizers.Adam(learning_rate=1e-3)
         model.optimizer = optimizer
 
-        # Convert to TensorFlow tensors for @tf.function compatibility
-        context_x_tf = tf.constant(context_x)
-        context_y_tf = tf.constant(context_y)
-        target_x_tf = tf.constant(target_x)
-        target_y_tf = tf.constant(target_y)
+        # Manually prepare data to match the expected signature for the raw train_step
+        context_x_prep = model._prepare_x(context_x)
+        context_y_prep = model._prepare_y(context_y)
+        target_x_prep = model._prepare_x(target_x)
+        target_y_prep = model._prepare_y(target_y)
 
-        loss = model.train_step(context_x_tf, context_y_tf, target_x_tf, target_y_tf)
+        logs = model.train_step(
+            context_x_prep, context_y_prep, target_x_prep, target_y_prep
+        )
 
-        assert isinstance(loss, (tf.Tensor, float))
-        assert not tf.math.is_nan(loss)
+        assert "loss" in logs
+        loss_val = logs["loss"]
+        assert isinstance(loss_val, tf.Tensor)
+        assert not tf.math.is_nan(loss_val)
 
     def test_cnp_test_step(self, context_target_data):
-        """Test CNP test_step method."""
+        """Test CNP test_step/predict method."""
         context_x, context_y, target_x, _ = context_target_data
 
-        model = CNP()
-        model.build([context_x.shape, context_y.shape, target_x.shape])
+        model = knp.CNP()
 
-        # Convert to TensorFlow tensors
-        context_x_tf = tf.constant(context_x)
-        context_y_tf = tf.constant(context_y)
-        target_x_tf = tf.constant(target_x)
-
-        pred_mean, pred_std = model.test_step(context_x_tf, context_y_tf, target_x_tf)
+        pred_mean, pred_std = model.predict(context_x, context_y, target_x)
 
         assert pred_mean.shape == target_x.shape[:-1] + (1,)  # (batch, num_points, 1)
         assert pred_std.shape == target_x.shape[:-1] + (1,)
@@ -352,54 +330,81 @@ class TestTrainingMethods:
         """Test NP train_step method."""
         context_x, context_y, target_x, target_y = context_target_data
 
-        model = NP()
-        model.build([context_x.shape, context_y.shape, target_x.shape, target_y.shape])
+        model = knp.NP()
 
         optimizer = keras.optimizers.Adam(learning_rate=1e-3)
         model.optimizer = optimizer
 
-        # Convert to TensorFlow tensors
-        context_x_tf = tf.constant(context_x)
-        context_y_tf = tf.constant(context_y)
-        target_x_tf = tf.constant(target_x)
-        target_y_tf = tf.constant(target_y)
+        # Manually prepare data for the raw train_step
+        context_x_prep = model._prepare_x(context_x)
+        context_y_prep = model._prepare_y(context_y)
+        target_x_prep = model._prepare_x(target_x)
+        target_y_prep = model._prepare_y(target_y)
 
-        loss, recon_loss, kl_div = model.train_step(
-            context_x_tf, context_y_tf, target_x_tf, target_y_tf
+        logs = model.train_step(
+            context_x_prep, context_y_prep, target_x_prep, target_y_prep
         )
 
-        assert isinstance(loss, (tf.Tensor, float))
-        assert isinstance(recon_loss, (tf.Tensor, float))
-        assert isinstance(kl_div, (tf.Tensor, float))
-        assert not tf.math.is_nan(loss)
-        assert not tf.math.is_nan(recon_loss)
-        assert not tf.math.is_nan(kl_div)
+        assert "loss" in logs
+        assert "recon_loss" in logs
+        assert "kl_div" in logs
+        assert not tf.math.is_nan(logs["loss"])
+        assert not tf.math.is_nan(logs["recon_loss"])
+        assert not tf.math.is_nan(logs["kl_div"])
 
 
 # Tests for error handling and edge cases
 class TestErrorHandling:
-
-    def test_incompatible_shapes(self):
-        """Test error handling for incompatible input shapes."""
-        model = CNP()
+    def test_incompatible_shapes_predict(self):
+        """Test error handling for incompatible shapes in predict."""
+        model = knp.CNP()
 
         # Test mismatched context_x and context_y batch dimensions
-        context_x = np.random.randn(2, 10, 1).astype(np.float32)
+        context_x = np.random.randn(2, 10, 2).astype(np.float32)
         context_y = np.random.randn(3, 10, 1).astype(np.float32)  # Different batch size
-        target_x = np.random.randn(2, 20, 1).astype(np.float32)
+        pred_x = np.random.randn(2, 20, 2).astype(np.float32)
 
-        # This should cause an error during the call, not build
-        model.build([context_x.shape, context_y.shape, target_x.shape])
+        with pytest.raises(ValueError, match="same number of samples and points"):
+            _ = model.predict(context_x, context_y, pred_x)
 
-        with pytest.raises((ValueError, tf.errors.InvalidArgumentError)):
-            _ = model([context_x, context_y, target_x])
+    def test_incompatible_shapes_train(self):
+        """Test error handling for incompatible shapes in train."""
+        model = knp.CNP()
+        optimizer = keras.optimizers.Adam()
+
+        # Mismatched samples
+        x_train = np.random.randn(2, 10, 2).astype(np.float32)
+        y_train = np.random.randn(3, 10, 1).astype(np.float32)
+
+        with pytest.raises(ValueError, match="same number of samples and points"):
+            model.train(x_train, y_train, epochs=1, optimizer=optimizer)
+
+    def test_invalid_x_shape(self):
+        """Test error for invalid x shape (not 1 or 2)."""
+        model = knp.CNP()
+        context_x = np.random.randn(2, 10, 3).astype(np.float32)
+        context_y = np.random.randn(2, 10, 1).astype(np.float32)
+        pred_x = np.random.randn(2, 20, 3).astype(np.float32)
+
+        with pytest.raises(ValueError, match="must have shape"):
+            model.predict(context_x, context_y, pred_x)
+
+    def test_invalid_y_shape(self):
+        """Test error for invalid y shape (not 1)."""
+        model = knp.CNP()
+        context_x = np.random.randn(2, 10, 2).astype(np.float32)
+        context_y = np.random.randn(2, 10, 2).astype(np.float32)
+        pred_x = np.random.randn(2, 20, 2).astype(np.float32)
+
+        with pytest.raises(ValueError, match="must have shape"):
+            model.predict(context_x, context_y, pred_x)
 
     def test_get_context_set_invalid_mode(self, sample_data_1d):
         """Test get_context_set with invalid mode."""
         x, y = sample_data_1d
 
         with pytest.raises(AttributeError):
-            utils.get_context_set(x, y, num_context=10, num_context_mode="invalid")
+            knp.utils.get_context_set(x, y, num_context=10, num_context_mode="invalid")
 
     def test_get_context_set_too_many_points(self, sample_data_1d):
         """Test get_context_set requesting more points than available."""
@@ -407,7 +412,7 @@ class TestErrorHandling:
         num_points = x.shape[1]
 
         with pytest.raises(ValueError):
-            utils.get_context_set(
+            knp.utils.get_context_set(
                 x, y, num_context=num_points + 10, num_context_mode="all"
             )
 
@@ -417,21 +422,21 @@ class TestModelSerialization:
 
     def test_cnp_get_config(self):
         """Test CNP get_config method."""
-        model = CNP(encoder_sizes=[64, 32], decoder_sizes=[32, 16], output_dims=2)
+        model = knp.CNP(encoder_sizes=[64, 32], decoder_sizes=[32, 16], y_dims=2)
         config = model.get_config()
 
         assert config["encoder_sizes"] == [64, 32]
         assert config["decoder_sizes"] == [32, 16]
-        assert config["output_dims"] == 2
+        assert config["y_dims"] == 2
 
     def test_np_get_config(self):
         """Test NP get_config method."""
-        model = NP(
+        model = knp.NP(
             det_encoder_sizes=[64, 32],
             latent_encoder_sizes=[32, 16],
             num_latents=64,
             decoder_sizes=[32, 16],
-            output_dims=2,
+            y_dims=2,
         )
         config = model.get_config()
 
@@ -439,26 +444,26 @@ class TestModelSerialization:
         assert config["latent_encoder_sizes"] == [32, 16]
         assert config["num_latents"] == 64
         assert config["decoder_sizes"] == [32, 16]
-        assert config["output_dims"] == 2
+        assert config["y_dims"] == 2
 
     def test_anp_get_config(self):
         """Test ANP get_config method."""
-        model = ANP(
-            encoder_sizes=[64, 32],
+        model = knp.ANP(
+            att_encoder_sizes=[64, 32],
             num_heads=4,
             latent_encoder_sizes=[32, 16],
             num_latents=64,
             decoder_sizes=[32, 16],
-            output_dims=2,
+            y_dims=2,
         )
         config = model.get_config()
 
-        assert config["encoder_sizes"] == [64, 32]
+        assert config["att_encoder_sizes"] == [64, 32]
         assert config["num_heads"] == 4
         assert config["latent_encoder_sizes"] == [32, 16]
         assert config["num_latents"] == 64
         assert config["decoder_sizes"] == [32, 16]
-        assert config["output_dims"] == 2
+        assert config["y_dims"] == 2
 
 
 # Tests for layers get_config methods
@@ -466,29 +471,29 @@ class TestLayerSerialization:
 
     def test_deterministic_encoder_config(self):
         """Test MeanEncoder get_config method."""
-        encoder = MeanEncoder(hidden_sizes=[64, 32, 16])
+        encoder = knp.MeanEncoder(sizes=[64, 32, 16])
         config = encoder.get_config()
-        assert config["hidden_sizes"] == [64, 32, 16]
+        assert config["sizes"] == [64, 32, 16]
 
     def test_latent_encoder_config(self):
         """Test LatentEncoder get_config method."""
-        encoder = LatentEncoder(hidden_sizes=[64, 32], num_latents=16)
+        encoder = knp.LatentEncoder(sizes=[64, 32], num_latents=16)
         config = encoder.get_config()
-        assert config["hidden_sizes"] == [64, 32]
+        assert config["sizes"] == [64, 32]
         assert config["num_latents"] == 16
 
     def test_attentive_encoder_config(self):
         """Test AttentiveEncoder get_config method."""
-        encoder = AttentiveEncoder(encoder_sizes=[64, 32], num_heads=4)
+        encoder = knp.AttentiveEncoder(encoder_sizes=[64, 32], num_heads=4)
         config = encoder.get_config()
         assert config["encoder_sizes"] == [64, 32]
         assert config["num_heads"] == 4
 
     def test_deterministic_decoder_config(self):
         """Test Decoder get_config method."""
-        decoder = Decoder(hidden_sizes=[64, 32, 2])
+        decoder = knp.Decoder(sizes=[64, 32, 2])
         config = decoder.get_config()
-        assert config["hidden_sizes"] == [64, 32, 2]
+        assert config["sizes"] == [64, 32, 2]
 
 
 # Tests for additional utility functions
@@ -505,11 +510,11 @@ class TestAdditionalUtilities:
         pred_y_std = 0.2 * np.ones_like(y)  # Constant uncertainty
 
         # Get context set
-        context_x, context_y = utils.get_context_set(
+        context_x, context_y = knp.utils.get_context_set(
             x, y, num_context=10, num_context_mode="all"
         )
 
-        metrics = utils.gplike_calculate_mymetrics(
+        metrics = knp.utils.gplike_calculate_mymetrics(
             pred_x, pred_y_mean, pred_y_std, x, y, context_x, context_y  # target
         )
 
@@ -528,16 +533,16 @@ class TestAdditionalUtilities:
     def test_is_per_channel_range(self):
         """Test _is_per_channel_range function."""
         # Test simple range (not per-channel)
-        assert not utils._is_per_channel_range([5, 10])
+        assert not knp.utils._is_per_channel_range([5, 10])
 
         # Test per-channel range
-        assert utils._is_per_channel_range([[5, 10], [3, 8]])
+        assert knp.utils._is_per_channel_range([[5, 10], [3, 8]])
 
         # Test empty input
-        assert not utils._is_per_channel_range([])
+        assert not knp.utils._is_per_channel_range([])
 
         # Test invalid format
-        assert not utils._is_per_channel_range([5, [3, 8]])
+        assert not knp.utils._is_per_channel_range([5, [3, 8]])
 
 
 # Tests for tensor vs numpy array handling
@@ -552,8 +557,7 @@ class TestTensorVsNumpyInputs:
         context_y_tf = tf.constant(context_y)
         target_x_tf = tf.constant(target_x)
 
-        model = CNP()
-        model.build([context_x.shape, context_y.shape, target_x.shape])
+        model = knp.CNP()
 
         mean, std = model([context_x_tf, context_y_tf, target_x_tf])
 
@@ -570,7 +574,7 @@ class TestTensorVsNumpyInputs:
         x_tf = tf.constant(x)
         y_tf = tf.constant(y)
 
-        context_x, context_y = utils.get_context_set(
+        context_x, context_y = knp.utils.get_context_set(
             x_tf, y_tf, num_context=10, num_context_mode="all"
         )
 
@@ -595,8 +599,7 @@ class TestDifferentDimensions:
         context_y = np.random.randn(batch_size, num_context, y_dim).astype(np.float32)
         target_x = np.random.randn(batch_size, num_targets, x_dim).astype(np.float32)
 
-        model = CNP(output_dims=y_dim)
-        model.build([context_x.shape, context_y.shape, target_x.shape])
+        model = knp.CNP(y_dims=y_dim)
 
         mean, std = model([context_x, context_y, target_x])
 
@@ -615,8 +618,7 @@ class TestDifferentDimensions:
         context_y = np.random.randn(batch_size, num_context, y_dim).astype(np.float32)
         target_x = np.random.randn(batch_size, num_targets, x_dim).astype(np.float32)
 
-        model = CNP()
-        model.build([context_x.shape, context_y.shape, target_x.shape])
+        model = knp.CNP()
 
         mean, std = model([context_x, context_y, target_x])
 
@@ -631,35 +633,21 @@ class TestIntegration:
         """Test complete training workflow for CNP."""
         x, y = sample_data_1d
 
-        model = CNP(encoder_sizes=[32, 32], decoder_sizes=[16, 16])
-        model.build([x[:, :10].shape, y[:, :10].shape, x.shape])
-
+        model = knp.CNP(encoder_sizes=[32, 32], decoder_sizes=[16, 16])
         optimizer = keras.optimizers.Adam(learning_rate=1e-3)
 
-        # Train for a few steps
-        losses = []
-        for step in range(3):
-            # Get context and target sets
-            context_x, context_y = utils.get_context_set(
-                x, y, num_context=10, num_context_mode="all"
-            )
-
-            context_x_tf = tf.constant(context_x)
-            context_y_tf = tf.constant(context_y)
-            target_x_tf = tf.constant(x)
-            target_y_tf = tf.constant(y)
-
-            model.optimizer = optimizer
-            loss = model.train_step(
-                context_x_tf, context_y_tf, target_x_tf, target_y_tf
-            )
-            losses.append(float(loss))
+        history = model.train(
+            x, y, epochs=3, optimizer=optimizer, batch_size=2, pbar=False, plotcb=False
+        )
 
         # Check that losses are finite
-        assert all(np.isfinite(loss) for loss in losses)
+        assert all(np.isfinite(loss) for loss in history.history["loss"])
 
         # Test prediction
-        pred_mean, pred_std = model.test_step(context_x_tf, context_y_tf, target_x_tf)
+        context_x, context_y = knp.utils.get_context_set(
+            x, y, num_context=10, num_context_mode="all"
+        )
+        pred_mean, pred_std = model.predict(context_x, context_y, x)
         assert pred_mean.shape == y.shape
         assert pred_std.shape == y.shape
         assert ops.all(pred_std > 0)
@@ -669,11 +657,10 @@ class TestIntegration:
         x, y = sample_data_1d
 
         # Create and build model
-        model = CNP(encoder_sizes=[32, 32], decoder_sizes=[16, 16])
-        model.build([x[:, :10].shape, y[:, :10].shape, x.shape])
+        model = knp.CNP(encoder_sizes=[32, 32], decoder_sizes=[16, 16])
 
         # Get some predictions before saving
-        context_x, context_y = utils.get_context_set(
+        context_x, context_y = knp.utils.get_context_set(
             x, y, num_context=10, num_context_mode="all"
         )
 
@@ -684,7 +671,7 @@ class TestIntegration:
         assert isinstance(config, dict)
         assert "encoder_sizes" in config
         assert "decoder_sizes" in config
-        assert "output_dims" in config
+        assert "y_dims" in config
 
         # Note: We don't actually save/load here since that requires more setup,
         # but we verify the configuration can be extracted which is needed for saving

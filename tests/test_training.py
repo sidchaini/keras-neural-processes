@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 import tensorflow as tf
 import keras
-from keras_neural_processes import CNP, NP, ANP
+import keras_neural_processes as knp
 
 
 class TestCNPTraining:
@@ -11,7 +11,7 @@ class TestCNPTraining:
         """Test CNP train method with minimal epochs."""
         x, y = small_training_data
 
-        model = CNP(encoder_sizes=[32, 32], decoder_sizes=[16, 16])
+        model = knp.CNP(encoder_sizes=[32, 32], decoder_sizes=[16, 16])
         optimizer = keras.optimizers.Adam(learning_rate=1e-3)
 
         # Train for just 2 epochs
@@ -45,7 +45,7 @@ class TestCNPTraining:
         x_train, x_val = x[:2], x[2:]
         y_train, y_val = y[:2], y[2:]
 
-        model = CNP(encoder_sizes=[16, 16], decoder_sizes=[8, 8])
+        model = knp.CNP(encoder_sizes=[16, 16], decoder_sizes=[8, 8])
         optimizer = keras.optimizers.Adam(learning_rate=1e-3)
 
         history = model.train(
@@ -68,7 +68,7 @@ class TestCNPTraining:
         """Test CNP training with 'all' context mode."""
         x, y = small_training_data
 
-        model = CNP(encoder_sizes=[16, 16], decoder_sizes=[8, 8])
+        model = knp.CNP(encoder_sizes=[16, 16], decoder_sizes=[8, 8])
         optimizer = keras.optimizers.Adam(learning_rate=1e-3)
 
         # Test with "all" mode for single-channel data
@@ -93,7 +93,7 @@ class TestNPTraining:
         """Test NP train method with minimal epochs."""
         x, y = small_training_data
 
-        model = NP(
+        model = knp.NP(
             det_encoder_sizes=[16, 16],
             latent_encoder_sizes=[16, 16],
             num_latents=16,
@@ -117,12 +117,12 @@ class TestNPTraining:
 
         # Check that history has all expected keys for NP
         assert "loss" in history.history
-        assert "reconstruction_loss" in history.history
+        assert "recon_loss" in history.history
         assert "kl_div" in history.history
         assert len(history.history["loss"]) == 2
 
         # Check that all losses are finite
-        for key in ["loss", "reconstruction_loss", "kl_div"]:
+        for key in ["loss", "recon_loss", "kl_div"]:
             losses = history.history[key]
             assert all(np.isfinite(loss) for loss in losses)
 
@@ -133,8 +133,8 @@ class TestANPTraining:
         """Test ANP train method with minimal epochs."""
         x, y = small_training_data
 
-        model = ANP(
-            encoder_sizes=[16, 16],
+        model = knp.ANP(
+            att_encoder_sizes=[16, 16],
             num_heads=2,
             latent_encoder_sizes=[16, 16],
             num_latents=16,
@@ -156,7 +156,7 @@ class TestANPTraining:
 
         # Check that history has all expected keys for ANP
         assert "loss" in history.history
-        assert "reconstruction_loss" in history.history
+        assert "recon_loss" in history.history
         assert "kl_div" in history.history
         assert len(history.history["loss"]) == 2
 
@@ -167,7 +167,7 @@ class TestTrainingParameters:
         """Test training with different batch sizes."""
         x, y = small_training_data
 
-        model = CNP(encoder_sizes=[16, 16], decoder_sizes=[8, 8])
+        model = knp.CNP(encoder_sizes=[16, 16], decoder_sizes=[8, 8])
         optimizer = keras.optimizers.Adam(learning_rate=1e-3)
 
         # Test with batch size equal to dataset size
@@ -189,7 +189,7 @@ class TestTrainingParameters:
         """Test training with different context range specifications."""
         x, y = small_training_data
 
-        model = CNP(encoder_sizes=[16, 16], decoder_sizes=[8, 8])
+        model = knp.CNP(encoder_sizes=[16, 16], decoder_sizes=[8, 8])
         optimizer = keras.optimizers.Adam(learning_rate=1e-3)
 
         # Test with single number for context range
@@ -228,7 +228,7 @@ class TestTrainingValidation:
         """Test that training validation works correctly."""
         x, y = small_training_data
 
-        model = CNP()
+        model = knp.CNP()
         optimizer = keras.optimizers.Adam(learning_rate=1e-3)
 
         # Test that assertion works when plotcb=True but no validation data
@@ -248,7 +248,7 @@ class TestTrainingValidation:
         x, y = small_training_data
         x_val, y_val = x[:2], y[:2]
 
-        model = CNP(encoder_sizes=[16, 16], decoder_sizes=[8, 8])
+        model = knp.CNP(encoder_sizes=[16, 16], decoder_sizes=[8, 8])
         optimizer = keras.optimizers.Adam(learning_rate=1e-3)
 
         # This should work without explicitly setting pred_points
@@ -276,7 +276,7 @@ class TestProgressTracking:
         """Test training with progress bar enabled (but don't check output)."""
         x, y = small_training_data
 
-        model = CNP(encoder_sizes=[16, 16], decoder_sizes=[8, 8])
+        model = knp.CNP(encoder_sizes=[16, 16], decoder_sizes=[8, 8])
         optimizer = keras.optimizers.Adam(learning_rate=1e-3)
 
         # This should run without errors even with pbar=True
@@ -298,7 +298,7 @@ class TestProgressTracking:
         """Test that Keras callbacks are properly integrated."""
         x, y = small_training_data
 
-        model = CNP(encoder_sizes=[16, 16], decoder_sizes=[8, 8])
+        model = knp.CNP(encoder_sizes=[16, 16], decoder_sizes=[8, 8])
         optimizer = keras.optimizers.Adam(learning_rate=1e-3)
 
         history = model.train(
@@ -333,7 +333,7 @@ class TestSeedHandling:
             np.random.seed(seed)
             tf.random.set_seed(seed)
 
-            model = CNP(encoder_sizes=[16, 16], decoder_sizes=[8, 8])
+            model = knp.CNP(encoder_sizes=[16, 16], decoder_sizes=[8, 8])
             optimizer = keras.optimizers.Adam(learning_rate=1e-3)
 
             history = model.train(
