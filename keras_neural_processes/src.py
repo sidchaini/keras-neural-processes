@@ -250,6 +250,24 @@ class BaseNeuralProcess(keras.Model):
     - `test_step(self, ...)`: To define the inference logic.
     """
 
+    def _compile_step_functions(self):
+        """
+        Compile train_step and test_step with a dynamic signature
+        based on the model's y_dims.
+        """
+        x_spec = tf.TensorSpec(shape=[None, None, 2], dtype="float32")
+        y_spec = tf.TensorSpec(shape=[None, None, self.y_dims], dtype="float32")
+
+        train_signature = [x_spec, y_spec, x_spec, y_spec]  # (xc, yc, xt, yt)
+        test_signature = [x_spec, y_spec, x_spec]  # (xc, yc, xt)
+
+        self.train_step = tf.function(
+            self.train_step, input_signature=train_signature, jit_compile=True
+        )
+        self.test_step = tf.function(
+            self.test_step, input_signature=test_signature, jit_compile=True
+        )
+
     def _prepare_x(self, X, name="X"):
         """
         Validate and prepare an X tensor.
@@ -416,13 +434,6 @@ class ConditionalModelMixin:
     Docstring
     """
 
-    # note: signature assumes long format
-    # i.e., for x: (n_samples, n_points_total, 2) where 2 for [x_value, channel_id]
-    # and for y: (n_samples, n_points_total, 1) where 1 for [y_value]
-    @tf.function(
-        jit_compile=True,
-        input_signature=TRAIN_SIGNATURE,
-    )
     def train_step(self, context_x, context_y, target_x, target_y):
         with tf.GradientTape() as tape:
             mean, std = self((context_x, context_y, target_x), training=True)
@@ -434,13 +445,6 @@ class ConditionalModelMixin:
         self.optimizer.apply(grads, self.trainable_weights)
         return {"loss": loss_value}
 
-    # note: signature assumes long format
-    # i.e., for x: (n_samples, n_points_total, 2) where 2 for [x_value, channel_id]
-    # and for y: (n_samples, n_points_total, 1) where 1 for [y_value]
-    @tf.function(
-        jit_compile=True,
-        input_signature=TEST_SIGNATURE,
-    )
     def test_step(self, context_x, context_y, pred_x):
         mean, std = self((context_x, context_y, pred_x), training=False)
         return mean, std
@@ -453,13 +457,6 @@ class LatentModelMixin:
     methods to other classes but is not meant to be instantiated on its own.
     """
 
-    # note: signature assumes long format
-    # i.e., for x: (n_samples, n_points_total, 2) where 2 for [x_value, channel_id]
-    # and for y: (n_samples, n_points_total, 1) where 1 for [y_value]
-    @tf.function(
-        jit_compile=True,
-        input_signature=TRAIN_SIGNATURE,
-    )
     def train_step(self, context_x, context_y, target_x, target_y):
         with tf.GradientTape() as tape:
             # The `call` method of NP/ANP returns the predictive distribution,
@@ -490,17 +487,21 @@ class LatentModelMixin:
 
         return {"loss": loss_value, "recon_loss": reconstruction_loss, "kl_div": kl_div}
 
-    # note: signature assumes long format
-    # i.e., for x: (n_samples, n_points_total, 2) where 2 for [x_value, channel_id]
-    # and for y: (n_samples, n_points_total, 1) where 1 for [y_value]
-    @tf.function(
-        jit_compile=True,
-        input_signature=TEST_SIGNATURE,
-    )
     def test_step(self, context_x, context_y, pred_x):
         # At test time, we don't have target_y. The `call` method will
         # sample the latent z from the prior distribution p(z|context).
-        pred_dist, _, _ = self((context_x, context_y, pred_x, None), training=False)
+
+        # Dummy target_y to avoid passing None, which can cause issues
+        # with Keras/optree internals when tracing the call graph. The values
+        # of this tensor are not used during inference.
+        shape = ops.shape(pred_x)
+        dummy_target_y = ops.zeros(
+            (shape[0], shape[1], self.y_dims), dtype=pred_x.dtype
+        )
+
+        pred_dist, _, _ = self(
+            (context_x, context_y, pred_x, dummy_target_y), training=False
+        )
         return pred_dist.mean(), pred_dist.stddev()
 
 
@@ -533,6 +534,8 @@ class CNP(ConditionalModelMixin, BaseNeuralProcess):
 
         self.encoder = MeanEncoder(self.encoder_sizes)
         self.decoder = Decoder(full_decoder_sizes)
+
+        self._compile_step_functions()
 
     def call(self, inputs, training=False):
         context_x, context_y, target_x = inputs
@@ -590,6 +593,8 @@ class NP(LatentModelMixin, BaseNeuralProcess):
         self.det_encoder = MeanEncoder(self.det_encoder_sizes)
         self.latent_encoder = LatentEncoder(self.latent_encoder_sizes, self.num_latents)
         self.decoder = Decoder(full_decoder_sizes)
+
+        self._compile_step_functions()
 
     def call(self, inputs, training=False):
         context_x, context_y, target_x, target_y = inputs
@@ -666,6 +671,8 @@ class ANP(LatentModelMixin, BaseNeuralProcess):
         self.att_encoder = AttentiveEncoder(self.att_encoder_sizes, self.num_heads)
         self.latent_encoder = LatentEncoder(self.latent_encoder_sizes, self.num_latents)
         self.decoder = Decoder(full_decoder_sizes)
+
+        self._compile_step_functions()
 
     def call(self, inputs, training=False):
         context_x, context_y, target_x, target_y = inputs
