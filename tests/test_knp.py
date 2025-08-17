@@ -600,11 +600,24 @@ class TestDifferentDimensions:
         target_x = np.random.randn(batch_size, num_targets, x_dim).astype(np.float32)
 
         model = knp.CNP(y_dims=y_dim)
+        optimizer = keras.optimizers.Adam()
+        model.optimizer = optimizer
 
+        # Test predict
         mean, std = model.predict(context_x, context_y, target_x)
+        assert mean.shape == (batch_size, num_targets, y_dim)
+        assert std.shape == (batch_size, num_targets, y_dim)
 
         assert mean.shape == (batch_size, num_targets, y_dim)
         assert std.shape == (batch_size, num_targets, y_dim)
+
+        # # Test train_step
+        # context_x = model._prepare_x(context_x)
+        # context_y = model._prepare_y(context_y)
+        # target_x = model._prepare_x(target_x)
+        # target_y = model._prepare_y(target_y)
+        # logs = model.train_step(context_x, context_y, target_x, target_y)
+        # assert "loss" in logs
 
     def test_multi_output_np(self):
         """Test NP with multi-dimensional output."""
@@ -629,7 +642,13 @@ class TestDifferentDimensions:
         assert std.shape == (batch_size, num_targets, y_dim)
 
         # Test train_step
-        logs = model.train_step(context_x, context_y, target_x, target_y)
+        context_x_prep = model._prepare_x(context_x)
+        context_y_prep = model._prepare_y(context_y)
+        target_x_prep = model._prepare_x(target_x)
+        target_y_prep = model._prepare_y(target_y)
+        logs = model.train_step(
+            context_x_prep, context_y_prep, target_x_prep, target_y_prep
+        )
         assert "loss" in logs
 
     def test_multi_output_anp(self):
@@ -655,7 +674,13 @@ class TestDifferentDimensions:
         assert std.shape == (batch_size, num_targets, y_dim)
 
         # Test train_step
-        logs = model.train_step(context_x, context_y, target_x, target_y)
+        context_x_prep = model._prepare_x(context_x)
+        context_y_prep = model._prepare_y(context_y)
+        target_x_prep = model._prepare_x(target_x)
+        target_y_prep = model._prepare_y(target_y)
+        logs = model.train_step(
+            context_x_prep, context_y_prep, target_x_prep, target_y_prep
+        )
         assert "loss" in logs
 
     def test_multi_input_cnp(self):
@@ -727,3 +752,78 @@ class TestIntegration:
 
         # Note: We don't actually save/load here since that requires more setup,
         # but we verify the configuration can be extracted which is needed for saving
+
+
+# Tests for model behavior
+class TestModelBehavior:
+    def test_cnp_training_flag(self, context_target_data, mocker):
+        """Verify CNP's call method is invoked with the correct training flag."""
+        context_x, context_y, target_x, target_y = context_target_data
+        model = knp.CNP()
+        model.optimizer = keras.optimizers.Adam()
+        spy = mocker.spy(model, "call")
+
+        # Test train_step
+        context_x_prep = model._prepare_x(context_x)
+        context_y_prep = model._prepare_y(context_y)
+        target_x_prep = model._prepare_x(target_x)
+        target_y_prep = model._prepare_y(target_y)
+        model.train_step(context_x_prep, context_y_prep, target_x_prep, target_y_prep)
+
+        spy.assert_called()
+        assert spy.call_args.kwargs["training"] is True
+
+        # Reset spy and test predict (which calls test_step)
+        spy.reset_mock()
+        model.predict(context_x, context_y, target_x)
+
+        spy.assert_called()
+        assert spy.call_args.kwargs["training"] is False
+
+    def test_np_training_flag(self, context_target_data, mocker):
+        """Verify NP's call method is invoked with the correct training flag."""
+        context_x, context_y, target_x, target_y = context_target_data
+        model = knp.NP()
+        model.optimizer = keras.optimizers.Adam()
+        spy = mocker.spy(model, "call")
+
+        # Test train_step
+        context_x_prep = model._prepare_x(context_x)
+        context_y_prep = model._prepare_y(context_y)
+        target_x_prep = model._prepare_x(target_x)
+        target_y_prep = model._prepare_y(target_y)
+        model.train_step(context_x_prep, context_y_prep, target_x_prep, target_y_prep)
+
+        spy.assert_called()
+        assert spy.call_args.kwargs["training"] is True
+
+        # Test predict
+        spy.reset_mock()
+        model.predict(context_x, context_y, target_x)
+
+        spy.assert_called()
+        assert spy.call_args.kwargs["training"] is False
+
+    def test_anp_training_flag(self, context_target_data, mocker):
+        """Verify ANP's call method is invoked with the correct training flag."""
+        context_x, context_y, target_x, target_y = context_target_data
+        model = knp.ANP()
+        model.optimizer = keras.optimizers.Adam()
+        spy = mocker.spy(model, "call")
+
+        # Test train_step
+        context_x_prep = model._prepare_x(context_x)
+        context_y_prep = model._prepare_y(context_y)
+        target_x_prep = model._prepare_x(target_x)
+        target_y_prep = model._prepare_y(target_y)
+        model.train_step(context_x_prep, context_y_prep, target_x_prep, target_y_prep)
+
+        spy.assert_called()
+        assert spy.call_args.kwargs["training"] is True
+
+        # Test predict
+        spy.reset_mock()
+        model.predict(context_x, context_y, target_x)
+
+        spy.assert_called()
+        assert spy.call_args.kwargs["training"] is False
