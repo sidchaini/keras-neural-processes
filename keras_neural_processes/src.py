@@ -547,9 +547,12 @@ class CNP(ConditionalModelMixin, BaseNeuralProcess):
 
         # 2. Repeat the representation for each target point to match dimensions
         num_targets = ops.shape(target_x)[1]
-        representation = ops.repeat(representation, num_targets, axis=1)
+        representation = ops.broadcast_to(
+            representation,
+            (ops.shape(representation)[0], num_targets, ops.shape(representation)[-1]),
+        )  # Shape: (batch, num_targets, dim)
 
-        # 3. Decode to get predictive distribution
+        # 3. Decode to get predicted distribution
         mean, std = self.decoder(representation, target_x)
         return mean, std
 
@@ -616,11 +619,17 @@ class NP(LatentModelMixin, BaseNeuralProcess):
             z = prior_dist.sample()
 
         num_targets = ops.shape(target_x)[1]
-        z_rep = ops.repeat(ops.expand_dims(z, axis=1), num_targets, axis=1)
+        z_rep = ops.broadcast_to(
+            ops.expand_dims(z, axis=1),
+            (ops.shape(z)[0], num_targets, ops.shape(z)[-1]),
+        )
 
         # Deterministic Path (using mean encoder)
         det_rep = self.det_encoder(context_x, context_y)
-        det_rep = ops.repeat(det_rep, num_targets, axis=1)
+        det_rep = ops.broadcast_to(
+            det_rep,
+            (ops.shape(det_rep)[0], num_targets, ops.shape(det_rep)[-1]),
+        )  # Shape: (batch, num_targets, dim)
 
         # Combine and Decode
         representation = ops.concatenate([det_rep, z_rep], axis=-1)
@@ -695,11 +704,14 @@ class ANP(LatentModelMixin, BaseNeuralProcess):
             z = prior_dist.sample()
 
         num_targets = ops.shape(target_x)[1]
-        z_rep = ops.repeat(ops.expand_dims(z, axis=1), num_targets, axis=1)
+        z_rep = ops.broadcast_to(
+            ops.expand_dims(z, axis=1),
+            (ops.shape(z)[0], num_targets, ops.shape(z)[-1]),
+        )
 
         # Deterministic Path (uses attention to get target-specific context)
         # Note: The output `det_rep` already has shape (batch, num_targets, features),
-        # so it does NOT need to be repeated like in CNP/NP.
+        # so it does NOT need to be broadcasted like in CNP/NP.
         det_rep = self.att_encoder(context_x, context_y, target_x)
 
         # Combine and Decode
