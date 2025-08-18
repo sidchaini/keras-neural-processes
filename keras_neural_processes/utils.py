@@ -311,7 +311,13 @@ def gplike_plot_functions(
     predval_colors = ["#56B4E9", "#E69F00", "#66c5ab", "#e0afca", "#f6ef8e", "#c2c2c2"]
     std_bgcolors = ["#9AC2E0", "#F3C4A5", "#b2e2d5", "#f0d7e5", "#faf7c6", "#e0e0e0"]
 
-    y_channels = np.unique(pred_x[:, :, 1])
+    # If 1 channel only
+    if pred_x.shape[-1] == 1:
+        y_channels = [0]  # Assign a default channel ID
+    # else Multi-channel
+    else:
+        y_channels = np.unique(pred_x[:, :, 1])
+
     n_y_channels = len(y_channels)
     if n_y_channels > len(trueval_colors):
         warnings.warn(f"Plotting supports a maximum of {len(trueval_colors)} channels.")
@@ -321,8 +327,18 @@ def gplike_plot_functions(
             break
         ych_num = i + 1
 
+        # Single channel mask: True for all points
+        if pred_x.shape[-1] == 1:
+            channel_mask = np.ones(target_x.shape[1], dtype=bool)
+            channel_mask_ctx = np.ones(context_x.shape[1], dtype=bool)
+            channel_mask_pred = np.ones(pred_x.shape[1], dtype=bool)
+        # For multi-channel mask: filter by channel ID
+        else:
+            channel_mask = target_x[objnum, :, 1] == y_channel
+            channel_mask_ctx = context_x[objnum, :, 1] == y_channel
+            channel_mask_pred = pred_x[objnum, :, 1] == y_channel
+
         # Plot truth first
-        channel_mask = target_x[objnum, :, 1] == y_channel
         ax.plot(
             target_x[objnum, channel_mask, 0],
             target_y[objnum, channel_mask, 0],
@@ -333,7 +349,6 @@ def gplike_plot_functions(
         )
 
         # Plot context points second
-        channel_mask_ctx = context_x[objnum, :, 1] == y_channel
         ax.plot(
             context_x[objnum, channel_mask_ctx, 0],
             context_y[objnum, channel_mask_ctx, 0],
@@ -345,7 +360,6 @@ def gplike_plot_functions(
         )
 
         # Plot predictions third
-        channel_mask_pred = pred_x[objnum, :, 1] == y_channel
         ax.plot(
             pred_x[objnum, channel_mask_pred, 0],
             pred_y_mean[objnum, channel_mask_pred, 0],

@@ -3,78 +3,68 @@ import pytest
 import tensorflow as tf
 import keras
 import keras_neural_processes as knp
+from unittest.mock import MagicMock
 
 
 class TestCNPTraining:
 
-    def test_cnp_train_method_basic(self, small_training_data):
-        """Test CNP train method with minimal epochs."""
-        x, y = small_training_data
-
-        model = knp.CNP(encoder_sizes=[32, 32], decoder_sizes=[16, 16])
-        optimizer = keras.optimizers.Adam(learning_rate=1e-3)
-
-        # Train for just 2 epochs
-        history = model.train(
-            X_train=x,
-            y_train=y,
-            epochs=2,
-            optimizer=optimizer,
-            batch_size=2,
-            num_context_range=[5, 10],
-            num_context_mode="all",
-            dataset_type="gp",
-            plotcb=False,  # Disable plotting for testing
-            pbar=False,  # Disable progress bar for testing
+    def test_cnp_train_method_basic(self, sample_gp_data_with_val):
+        """Test the basic training loop of a CNP model."""
+        X_train, y_train, _, _ = sample_gp_data_with_val
+        model = knp.CNP(
+            encoder_sizes=[64, 64],
+            decoder_sizes=[64, 64],
+            x_dims=1,
+            y_dims=1,
         )
-
-        # Check that history object exists and has loss data
-        assert hasattr(history, "history")
-        assert "loss" in history.history
-        assert len(history.history["loss"]) == 2  # 2 epochs
-
-        # Check that losses are finite
-        losses = history.history["loss"]
-        assert all(np.isfinite(loss) for loss in losses)
-
-    def test_cnp_train_with_validation(self, small_training_data):
-        """Test CNP training with validation data but no plotting."""
-        x, y = small_training_data
-
-        # Split into train/val
-        x_train, x_val = x[:2], x[2:]
-        y_train, y_val = y[:2], y[2:]
-
-        model = knp.CNP(encoder_sizes=[16, 16], decoder_sizes=[8, 8])
         optimizer = keras.optimizers.Adam(learning_rate=1e-3)
-
         history = model.train(
-            X_train=x_train,
-            y_train=y_train,
-            epochs=2,
+            X_train,
+            y_train,
+            epochs=3,
             optimizer=optimizer,
-            batch_size=1,
-            num_context_range=[3, 6],
-            num_context_mode="all",  # Use "all" mode for single-channel data
-            X_val=x_val,
-            y_val=y_val,
-            plotcb=False,  # Disable plotting for testing
             pbar=False,
+            plotcb=False,
+            num_context_mode="all",
         )
+        assert "loss" in history.history
+        assert len(history.history["loss"]) == 3
+        assert np.all(np.isfinite(history.history["loss"]))
 
-        assert len(history.history["loss"]) == 2
-
-    def test_cnp_train_different_context_modes(self, small_training_data):
-        """Test CNP training with 'all' context mode."""
-        x, y = small_training_data
-
-        model = knp.CNP(encoder_sizes=[16, 16], decoder_sizes=[8, 8])
-        optimizer = keras.optimizers.Adam(learning_rate=1e-3)
-
-        # Test with "all" mode for single-channel data
+    def test_cnp_train_with_validation(self, sample_gp_data_with_val):
+        """Test training with a validation set and plotting callback."""
+        X_train, y_train, X_val, y_val = sample_gp_data_with_val
+        model = knp.CNP(
+            encoder_sizes=[32, 32],
+            decoder_sizes=[32, 32],
+            x_dims=1,
+            y_dims=1,
+        )
+        optimizer = keras.optimizers.Adam()
         history = model.train(
-            X_train=x,
-            y_train=y,
+            X_train,
+            y_train,
+            epochs=2,
+            optimizer=optimizer,
+            pbar=False,
+            plotcb=True,
+            plot_every=2,
+            X_val=X_val,
+            y_val=y_val,
+            num_context_mode="all",
+        )
+        assert "loss" in history.history
+
+    def test_cnp_train_different_context_modes(self, sample_gp_data_with_val):
+        """Test that training runs with different context sampling modes."""
+        X_train, y_train, _, _ = sample_gp_data_with_val
+        model = knp.CNP(x_dims=1, y_dims=1)
+        optimizer = keras.optimizers.Adam()
+
+        # Test with 'all' mode
+        model.train(
+            X_train,
+            y_train,
             epochs=1,
             optimizer=optimizer,
             batch_size=2,
@@ -84,38 +74,29 @@ class TestCNPTraining:
             pbar=False,
         )
 
-        assert len(history.history["loss"]) == 1
-
 
 class TestNPTraining:
 
-    def test_np_train_method_basic(self, small_training_data):
-        """Test NP train method with minimal epochs."""
-        x, y = small_training_data
-
+    def test_np_train_method_basic(self, sample_gp_data_with_val):
+        """Test the basic training loop of an NP model."""
+        X_train, y_train, _, _ = sample_gp_data_with_val
         model = knp.NP(
-            det_encoder_sizes=[16, 16],
-            latent_encoder_sizes=[16, 16],
-            num_latents=16,
-            decoder_sizes=[8, 8],
+            det_encoder_sizes=[32, 32],
+            latent_encoder_sizes=[32, 32],
+            decoder_sizes=[32, 32],
+            x_dims=1,
+            y_dims=1,
         )
-        optimizer = keras.optimizers.Adam(learning_rate=1e-3)
-
-        # Train for just 2 epochs
+        optimizer = keras.optimizers.Adam()
         history = model.train(
-            X_train=x,
-            y_train=y,
+            X_train,
+            y_train,
             epochs=2,
             optimizer=optimizer,
-            batch_size=2,
-            num_context_range=[3, 6],
-            num_context_mode="all",
-            dataset_type="gp",
-            plotcb=False,
             pbar=False,
+            plotcb=False,
+            num_context_mode="all",
         )
-
-        # Check that history has all expected keys for NP
         assert "loss" in history.history
         assert "recon_loss" in history.history
         assert "kl_div" in history.history
@@ -129,32 +110,26 @@ class TestNPTraining:
 
 class TestANPTraining:
 
-    def test_anp_train_method_basic(self, small_training_data):
-        """Test ANP train method with minimal epochs."""
-        x, y = small_training_data
-
+    def test_anp_train_method_basic(self, sample_gp_data_with_val):
+        """Test the basic training loop of an ANP model."""
+        X_train, y_train, _, _ = sample_gp_data_with_val
         model = knp.ANP(
-            att_encoder_sizes=[16, 16],
-            num_heads=2,
-            latent_encoder_sizes=[16, 16],
-            num_latents=16,
-            decoder_sizes=[8, 8],
+            att_encoder_sizes=[32, 32],
+            latent_encoder_sizes=[32, 32],
+            decoder_sizes=[32, 32],
+            x_dims=1,
+            y_dims=1,
         )
-        optimizer = keras.optimizers.Adam(learning_rate=1e-3)
-
+        optimizer = keras.optimizers.Adam()
         history = model.train(
-            X_train=x,
-            y_train=y,
+            X_train,
+            y_train,
             epochs=2,
             optimizer=optimizer,
-            batch_size=2,
-            num_context_range=[3, 6],
-            num_context_mode="all",
-            plotcb=False,
             pbar=False,
+            plotcb=False,
+            num_context_mode="all",
         )
-
-        # Check that history has all expected keys for ANP
         assert "loss" in history.history
         assert "recon_loss" in history.history
         assert "kl_div" in history.history
@@ -163,79 +138,85 @@ class TestANPTraining:
 
 class TestTrainingParameters:
 
-    def test_training_with_different_batch_sizes(self, small_training_data):
-        """Test training with different batch sizes."""
-        x, y = small_training_data
+    def test_training_with_different_batch_sizes(self, sample_gp_data_with_val):
+        """Test that training respects different batch sizes."""
+        X_train, y_train, _, _ = sample_gp_data_with_val
+        model = knp.CNP(x_dims=1, y_dims=1)
+        optimizer = keras.optimizers.Adam()
 
-        model = knp.CNP(encoder_sizes=[16, 16], decoder_sizes=[8, 8])
-        optimizer = keras.optimizers.Adam(learning_rate=1e-3)
-
-        # Test with batch size equal to dataset size
-        history = model.train(
-            X_train=x,
-            y_train=y,
+        # Larger batch size
+        history1 = model.train(
+            X_train,
+            y_train,
             epochs=1,
             optimizer=optimizer,
-            batch_size=x.shape[0],  # Same as dataset size
+            batch_size=X_train.shape[0],
             num_context_range=[2, 4],
             num_context_mode="all",
             plotcb=False,
             pbar=False,
         )
-
-        assert len(history.history["loss"]) == 1
-
-    def test_training_with_different_context_ranges(self, small_training_data):
-        """Test training with different context range specifications."""
-        x, y = small_training_data
-
-        model = knp.CNP(encoder_sizes=[16, 16], decoder_sizes=[8, 8])
-        optimizer = keras.optimizers.Adam(learning_rate=1e-3)
-
-        # Test with single number for context range
-        history1 = model.train(
-            X_train=x,
-            y_train=y,
-            epochs=1,
-            optimizer=optimizer,
-            batch_size=2,
-            num_context_range=[5, 5],  # Fixed number
-            num_context_mode="all",
-            plotcb=False,
-            pbar=False,
-        )
-
-        # Test with range
-        history2 = model.train(
-            X_train=x,
-            y_train=y,
-            epochs=1,
-            optimizer=optimizer,
-            batch_size=2,
-            num_context_range=[3, 8],  # Range
-            num_context_mode="all",
-            plotcb=False,
-            pbar=False,
-        )
-
         assert len(history1.history["loss"]) == 1
-        assert len(history2.history["loss"]) == 1
+
+        # Smaller batch size
+        history2 = model.train(
+            X_train,
+            y_train,
+            epochs=2,
+            optimizer=optimizer,
+            batch_size=2,
+            pbar=False,
+            plotcb=False,
+            num_context_mode="all",
+        )
+        assert "loss" in history2.history
+
+    def test_training_with_different_context_ranges(self, sample_gp_data_with_val):
+        """Test that training works with different context point ranges."""
+        X_train, y_train, _, _ = sample_gp_data_with_val
+        model = knp.CNP(x_dims=1, y_dims=1)
+        optimizer = keras.optimizers.Adam()
+
+        # Single number for num_context_range
+        history1 = model.train(
+            X_train,
+            y_train,
+            epochs=1,
+            optimizer=optimizer,
+            num_context_range=[5, 10],
+            num_context_mode="all",
+            pbar=False,
+            plotcb=False,
+        )
+        assert "loss" in history1.history
+
+        # Range for num_context_range
+        history2 = model.train(
+            X_train,
+            y_train,
+            epochs=2,
+            optimizer=optimizer,
+            num_context_range=[5, 15],
+            num_context_mode="all",
+            pbar=False,
+            plotcb=False,
+        )
+        assert "loss" in history2.history
 
 
 class TestTrainingValidation:
 
-    def test_training_assertions(self, small_training_data):
-        """Test that training validation works correctly."""
-        x, y = small_training_data
+    def test_training_assertions(self, sample_gp_data_with_val):
+        """Test assertions for invalid training configurations."""
+        X_train, y_train, X_val, y_val = sample_gp_data_with_val
+        model = knp.CNP(x_dims=1, y_dims=1)
+        optimizer = keras.optimizers.Adam()
 
-        model = knp.CNP()
-        optimizer = keras.optimizers.Adam(learning_rate=1e-3)
-
-        # Test that assertion works when plotcb=True but no validation data
+        # Should fail if plotcb is True but no validation data is provided
         with pytest.raises(AssertionError, match="Validation data must be provided"):
             model.train(
-                X_train=x,
-                y_train=y,
+                X_train=X_train,
+                y_train=y_train,
                 epochs=1,
                 optimizer=optimizer,
                 plotcb=True,  # This should require validation data
@@ -243,25 +224,25 @@ class TestTrainingValidation:
                 y_val=None,
             )
 
-    def test_pred_points_default_setting(self, small_training_data):
-        """Test that pred_points is set correctly for GP dataset."""
-        x, y = small_training_data
-        x_val, y_val = x[:2], y[:2]
+    def test_pred_points_default_setting(self, sample_gp_data_with_val):
+        """Test that pred_points defaults correctly when not provided."""
+        X_train, y_train, X_val, y_val = sample_gp_data_with_val
+        model = knp.CNP(x_dims=1, y_dims=1)
+        optimizer = keras.optimizers.Adam()
 
-        model = knp.CNP(encoder_sizes=[16, 16], decoder_sizes=[8, 8])
-        optimizer = keras.optimizers.Adam(learning_rate=1e-3)
-
+        # Mock the plotting function to inspect its arguments
+        mock_gplike_val_step = MagicMock()
         # This should work without explicitly setting pred_points
         history = model.train(
-            X_train=x,
-            y_train=y,
+            X_train,
+            y_train,
             epochs=1,
             optimizer=optimizer,
             batch_size=2,
             num_context_range=[3, 6],
             num_context_mode="all",
             dataset_type="gp",
-            X_val=x_val,
+            X_val=X_val,
             y_val=y_val,
             plotcb=False,  # Don't actually plot, but validate the setup
             pbar=False,
@@ -272,39 +253,59 @@ class TestTrainingValidation:
 
 class TestProgressTracking:
 
-    def test_training_with_progress_bar(self, small_training_data):
-        """Test training with progress bar enabled (but don't check output)."""
-        x, y = small_training_data
+    def test_training_with_progress_bar(self, sample_gp_data_with_val, mocker):
+        """Test that the progress bar is used when pbar=True."""
+        X_train, y_train, _, _ = sample_gp_data_with_val
+        model = knp.CNP(x_dims=1, y_dims=1)
+        optimizer = keras.optimizers.Adam()
 
-        model = knp.CNP(encoder_sizes=[16, 16], decoder_sizes=[8, 8])
-        optimizer = keras.optimizers.Adam(learning_rate=1e-3)
+        mock_progbar = mocker.patch("keras_neural_processes.src.Progbar")
 
-        # This should run without errors even with pbar=True
-        history = model.train(
-            X_train=x,
-            y_train=y,
+        # Train with pbar=True (default)
+        model.train(
+            X_train,
+            y_train,
             epochs=2,
             optimizer=optimizer,
-            batch_size=2,
-            num_context_range=[3, 6],
-            num_context_mode="all",
             plotcb=False,
-            pbar=True,  # Enable progress bar
+            num_context_mode="all",
+        )
+        assert mock_progbar.call_count == 1
+
+        # Train with pbar=False
+        mock_progbar.reset_mock()
+        model.train(
+            X_train,
+            y_train,
+            epochs=2,
+            optimizer=optimizer,
+            pbar=False,
+            plotcb=False,
+            num_context_mode="all",
+        )
+        assert mock_progbar.call_count == 0
+
+    def test_callbacks_integration(self, sample_gp_data_with_val, mocker):
+        """Test that Keras callbacks are correctly integrated."""
+        X_train, y_train, _, _ = sample_gp_data_with_val
+        model = knp.CNP(x_dims=1, y_dims=1)
+        optimizer = keras.optimizers.Adam()
+
+        mock_callback_list = mocker.patch(
+            "keras_neural_processes.src.keras.callbacks.CallbackList"
+        )
+        mock_history = mocker.patch(
+            "keras_neural_processes.src.keras.callbacks.History"
         )
 
-        assert len(history.history["loss"]) == 2
+        mock_history_instance = mock_history.return_value
+        mock_callback_list_instance = mock_callback_list.return_value
 
-    def test_callbacks_integration(self, small_training_data):
-        """Test that Keras callbacks are properly integrated."""
-        x, y = small_training_data
-
-        model = knp.CNP(encoder_sizes=[16, 16], decoder_sizes=[8, 8])
-        optimizer = keras.optimizers.Adam(learning_rate=1e-3)
-
-        history = model.train(
-            X_train=x,
-            y_train=y,
-            epochs=3,
+        epochs = 3
+        model.train(
+            X_train,
+            y_train,
+            epochs=epochs,
             optimizer=optimizer,
             batch_size=2,
             num_context_range=[3, 6],
@@ -313,52 +314,52 @@ class TestProgressTracking:
             pbar=False,
         )
 
-        # History should be properly tracked
-        assert hasattr(history, "history")
-        assert len(history.history["loss"]) == 3
-
-        # Check that callbacks properly tracked epochs
-        assert hasattr(history, "epoch")
-        assert len(history.epoch) == 3
+        assert mock_callback_list.call_count == 1
+        assert mock_callback_list_instance.on_train_begin.call_count == 1
+        assert mock_callback_list_instance.on_epoch_begin.call_count == epochs
+        assert mock_callback_list_instance.on_epoch_end.call_count == epochs
 
 
 class TestSeedHandling:
 
-    def test_training_reproducibility_with_seed(self, small_training_data):
-        """Test that training can be made reproducible with seeds."""
-        x, y = small_training_data
+    def test_training_reproducibility_with_seed(self, sample_gp_data_with_val, mocker):
+        """Test that training is reproducible when a seed is provided for validation."""
+        X_train, y_train, X_val, y_val = sample_gp_data_with_val
+        model = knp.CNP(x_dims=1, y_dims=1)
+        optimizer = keras.optimizers.Adam()
+
+        # Mock the plotting function to capture the seed it receives
+        mock_gplike_val_step = MagicMock()
+        mocker.patch(
+            "keras_neural_processes.utils.gplike_val_step", mock_gplike_val_step
+        )
 
         def train_model_with_seed(seed):
-            # Set seeds for reproducibility
-            np.random.seed(seed)
-            tf.random.set_seed(seed)
-
-            model = knp.CNP(encoder_sizes=[16, 16], decoder_sizes=[8, 8])
-            optimizer = keras.optimizers.Adam(learning_rate=1e-3)
-
             history = model.train(
-                X_train=x,
-                y_train=y,
+                X_train,
+                y_train,
                 epochs=2,
                 optimizer=optimizer,
-                batch_size=2,
-                num_context_range=[3, 6],
+                X_val=X_val,
+                y_val=y_val,
+                seed_val=seed,
+                plot_every=1,
                 num_context_mode="all",
-                plotcb=False,
-                pbar=False,
-                seed_val=seed,  # Validation seed
             )
+            return history, mock_gplike_val_step.call_args_list
 
-            return history.history["loss"]
+        # Run training twice with the same seed
+        mock_gplike_val_step.reset_mock()
+        _, calls1 = train_model_with_seed(seed=42)
 
-        # Train with same seed twice
-        losses1 = train_model_with_seed(42)
-        losses2 = train_model_with_seed(42)
+        mock_gplike_val_step.reset_mock()
+        _, calls2 = train_model_with_seed(seed=42)
 
-        # Results should be deterministic (though individual training may still vary)
-        assert len(losses1) == len(losses2)
-        assert len(losses1) == 2
+        # Run training with a different seed
+        mock_gplike_val_step.reset_mock()
+        _, calls3 = train_model_with_seed(seed=99)
 
-        # Train with different seed
-        losses3 = train_model_with_seed(123)
-        assert len(losses3) == 2
+        # Check that the seeds were passed correctly
+        assert calls1[0].kwargs["seed"] == 42
+        assert calls2[0].kwargs["seed"] == 42
+        assert calls3[0].kwargs["seed"] == 99

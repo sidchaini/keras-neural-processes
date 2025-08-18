@@ -255,7 +255,7 @@ class BaseNeuralProcess(keras.Model):
         Compile train_step and test_step with a dynamic signature
         based on the model's y_dims.
         """
-        x_spec = tf.TensorSpec(shape=[None, None, 2], dtype="float32")
+        x_spec = tf.TensorSpec(shape=[None, None, self.x_dims], dtype="float32")
         y_spec = tf.TensorSpec(shape=[None, None, self.y_dims], dtype="float32")
 
         train_signature = [x_spec, y_spec, x_spec, y_spec]  # (xc, yc, xt, yt)
@@ -279,21 +279,21 @@ class BaseNeuralProcess(keras.Model):
                 f"{name} must be a 3D tensor, but got {len(X.shape)} dims."
             )
 
-        if X.shape[-1] == 1:
-            warnings.warn(
-                f"Input '{name}' has shape {X.shape}, suggesting 1D x-values. "
-                "It will be automatically reshaped to (..., 2) by adding a "
-                "default channel ID of 0 for all points. If this is not the "
-                "intended behavior, please reshape your data manually.",
-                UserWarning,
-            )
-            # Add a channel of zeros
-            zeros = ops.zeros_like(X)
-            X = ops.concatenate([X, zeros], axis=-1)
+        # if X.shape[-1] == 1:
+        #     warnings.warn(
+        #         f"Input '{name}' has shape {X.shape}, suggesting 1D x-values. "
+        #         "It will be automatically reshaped to (..., 2) by adding a "
+        #         "default channel ID of 0 for all points. If this is not the "
+        #         "intended behavior, please reshape your data manually.",
+        #         UserWarning,
+        #     )
+        #     # Add a channel of zeros
+        #     zeros = ops.zeros_like(X)
+        #     X = ops.concatenate([X, zeros], axis=-1)
 
-        if X.shape[-1] != 2:
+        if X.shape[-1] != self.x_dims:
             raise ValueError(
-                f"{name} must have shape (..., 2) at the last dimension, "
+                f"{name} must have shape (..., {self.x_dims}) at the last dimension, "
                 f"but got shape {X.shape}."
             )
         return X
@@ -420,11 +420,11 @@ class BaseNeuralProcess(keras.Model):
                         num_context_range,
                         num_context_mode,
                         epoch,
-                        seed_val,
+                        seed=seed_val,
                     )
                 elif dataset_type == "mnist":
                     utils.mnist_val_step(
-                        self, X_val, y_val, num_context_range, epoch, seed_val
+                        self, X_val, y_val, num_context_range, epoch, seed=seed_val
                     )
         return history
 
@@ -521,13 +521,15 @@ class CNP(ConditionalModelMixin, BaseNeuralProcess):
         self,
         encoder_sizes=[128, 128, 128, 128],
         decoder_sizes=[128, 128],
+        x_dims=2,
         y_dims=1,
         **kwargs,
     ):
         super().__init__(**kwargs)
         self.encoder_sizes = list(encoder_sizes)
-        self.y_dims = y_dims
         self.decoder_sizes = list(decoder_sizes)
+        self.x_dims = x_dims
+        self.y_dims = y_dims
         full_decoder_sizes = self.decoder_sizes + [
             2 * self.y_dims
         ]  # adding 2 per dim: mu and sigma
@@ -557,6 +559,7 @@ class CNP(ConditionalModelMixin, BaseNeuralProcess):
             {
                 "encoder_sizes": self.encoder_sizes,
                 "decoder_sizes": self.decoder_sizes,
+                "x_dims": self.x_dims,
                 "y_dims": self.y_dims,
             }
         )
@@ -577,6 +580,7 @@ class NP(LatentModelMixin, BaseNeuralProcess):
         latent_encoder_sizes=[128, 128],
         num_latents=128,
         decoder_sizes=[128, 128],
+        x_dims=2,
         y_dims=1,
         **kwargs,
     ):
@@ -584,8 +588,9 @@ class NP(LatentModelMixin, BaseNeuralProcess):
         self.det_encoder_sizes = list(det_encoder_sizes)
         self.latent_encoder_sizes = list(latent_encoder_sizes)
         self.num_latents = num_latents
-        self.y_dims = y_dims
         self.decoder_sizes = list(decoder_sizes)
+        self.x_dims = x_dims
+        self.y_dims = y_dims
         full_decoder_sizes = self.decoder_sizes + [
             2 * self.y_dims
         ]  # adding 2 per dim: mu and sigma
@@ -632,6 +637,7 @@ class NP(LatentModelMixin, BaseNeuralProcess):
                 "latent_encoder_sizes": self.latent_encoder_sizes,
                 "num_latents": self.num_latents,
                 "decoder_sizes": self.decoder_sizes,
+                "x_dims": self.x_dims,
                 "y_dims": self.y_dims,
             }
         )
@@ -653,6 +659,7 @@ class ANP(LatentModelMixin, BaseNeuralProcess):
         latent_encoder_sizes=[128, 128],
         num_latents=128,
         decoder_sizes=[128, 128],
+        x_dims=2,
         y_dims=1,
         **kwargs,
     ):
@@ -661,9 +668,10 @@ class ANP(LatentModelMixin, BaseNeuralProcess):
         self.num_heads = num_heads
         self.latent_encoder_sizes = list(latent_encoder_sizes)
         self.num_latents = num_latents
+        self.decoder_sizes = list(decoder_sizes)
+        self.x_dims = x_dims
         self.y_dims = y_dims
 
-        self.decoder_sizes = list(decoder_sizes)
         full_decoder_sizes = self.decoder_sizes + [
             2 * self.y_dims
         ]  # adding 2 per dim: mu and sigma
@@ -710,6 +718,7 @@ class ANP(LatentModelMixin, BaseNeuralProcess):
                 "latent_encoder_sizes": self.latent_encoder_sizes,
                 "num_latents": self.num_latents,
                 "decoder_sizes": self.decoder_sizes,
+                "x_dims": self.x_dims,
                 "y_dims": self.y_dims,
             }
         )
