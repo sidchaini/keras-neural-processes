@@ -1,8 +1,6 @@
 import numpy as np
 import pytest
 
-from keras_neural_processes import utils
-
 
 def generate_gp_data(batch_size, num_points, x_range=(-2, 2), noise_std=0.02):
     """Helper to generate 1D Gaussian Process data."""

@@ -1,6 +1,5 @@
 import numpy as np
 import pytest
-import tensorflow as tf
 import keras
 import keras_neural_processes as knp
 from unittest.mock import MagicMock
@@ -229,8 +228,6 @@ class TestTrainingValidation:
         model = knp.CNP(x_dims=1, y_dims=1)
         optimizer = keras.optimizers.Adam()
 
-        # Mock the plotting function to inspect its arguments
-        mock_gplike_val_step = MagicMock()
         # This should work without explicitly setting pred_points
         history = model.train(
             X_train,
@@ -293,11 +290,6 @@ class TestProgressTracking:
         mock_callback_list = mocker.patch(
             "keras_neural_processes.src.keras.callbacks.CallbackList"
         )
-        mock_history = mocker.patch(
-            "keras_neural_processes.src.keras.callbacks.History"
-        )
-
-        mock_history_instance = mock_history.return_value
         mock_callback_list_instance = mock_callback_list.return_value
 
         epochs = 3
