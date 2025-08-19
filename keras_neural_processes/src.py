@@ -296,12 +296,6 @@ class BaseNeuralProcess(keras.Model):
             raise ValueError(
                 f"{name} must be a 3D tensor, but got {len(X.shape)} dims."
             )
-
-        if X.shape[-1] != self.x_dims:
-            raise ValueError(
-                f"{name} must have shape (..., {self.x_dims}) at the last dimension, "
-                f"but got shape {X.shape}."
-            )
         return X
 
     def _prepare_y(self, y, name="y"):
@@ -527,14 +521,12 @@ class CNP(ConditionalModelMixin, BaseNeuralProcess):
         self,
         encoder_sizes=[128, 128, 128, 128],
         decoder_sizes=[128, 128],
-        x_dims=2,
         y_dims=1,
         **kwargs,
     ):
         super().__init__(**kwargs)
         self.encoder_sizes = list(encoder_sizes)
         self.decoder_sizes = list(decoder_sizes)
-        self.x_dims = x_dims
         self.y_dims = y_dims
         full_decoder_sizes = self.decoder_sizes + [
             2 * self.y_dims
@@ -566,7 +558,6 @@ class CNP(ConditionalModelMixin, BaseNeuralProcess):
             {
                 "encoder_sizes": self.encoder_sizes,
                 "decoder_sizes": self.decoder_sizes,
-                "x_dims": self.x_dims,
                 "y_dims": self.y_dims,
             }
         )
@@ -587,7 +578,6 @@ class NP(LatentModelMixin, BaseNeuralProcess):
         latent_encoder_sizes=[128, 128],
         num_latents=128,
         decoder_sizes=[128, 128],
-        x_dims=2,
         y_dims=1,
         **kwargs,
     ):
@@ -596,7 +586,6 @@ class NP(LatentModelMixin, BaseNeuralProcess):
         self.latent_encoder_sizes = list(latent_encoder_sizes)
         self.num_latents = num_latents
         self.decoder_sizes = list(decoder_sizes)
-        self.x_dims = x_dims
         self.y_dims = y_dims
         full_decoder_sizes = self.decoder_sizes + [
             2 * self.y_dims
@@ -648,7 +637,6 @@ class NP(LatentModelMixin, BaseNeuralProcess):
                 "latent_encoder_sizes": self.latent_encoder_sizes,
                 "num_latents": self.num_latents,
                 "decoder_sizes": self.decoder_sizes,
-                "x_dims": self.x_dims,
                 "y_dims": self.y_dims,
             }
         )
@@ -670,7 +658,6 @@ class ANP(LatentModelMixin, BaseNeuralProcess):
         latent_encoder_sizes=[128, 128],
         num_latents=128,
         decoder_sizes=[128, 128],
-        x_dims=2,
         y_dims=1,
         **kwargs,
     ):
@@ -680,7 +667,6 @@ class ANP(LatentModelMixin, BaseNeuralProcess):
         self.latent_encoder_sizes = list(latent_encoder_sizes)
         self.num_latents = num_latents
         self.decoder_sizes = list(decoder_sizes)
-        self.x_dims = x_dims
         self.y_dims = y_dims
 
         full_decoder_sizes = self.decoder_sizes + [
@@ -730,7 +716,6 @@ class ANP(LatentModelMixin, BaseNeuralProcess):
                 "latent_encoder_sizes": self.latent_encoder_sizes,
                 "num_latents": self.num_latents,
                 "decoder_sizes": self.decoder_sizes,
-                "x_dims": self.x_dims,
                 "y_dims": self.y_dims,
             }
         )
