@@ -8,22 +8,11 @@ import keras_neural_processes as knp
 
 
 # Tests for basic model instantiation
-def test_CNP():
-    model = knp.CNP()
+def test_model_instantiation(model_class):
+    """Test that all models can be instantiated."""
+    model = model_class()
     assert model is not None
-    assert isinstance(model, knp.CNP)
-
-
-def test_NP():
-    model = knp.NP()
-    assert model is not None
-    assert isinstance(model, knp.NP)
-
-
-def test_ANP():
-    model = knp.ANP()
-    assert model is not None
-    assert isinstance(model, knp.ANP)
+    assert isinstance(model, model_class)
 
 
 # Tests for model configuration and instantiation with custom parameters
@@ -78,61 +67,37 @@ class TestModelInstantiation:
 
 # Tests for model building and forward passes
 class TestModelFunctionality:
-
-    def test_cnp_build_and_call(self, context_target_data):
-        """Test CNP build and forward pass."""
+    def test_model_build_and_call(self, model_class, context_target_data):
+        """Test model build and forward pass for all model types."""
         context_x, context_y, target_x, target_y = context_target_data
+        model = model_class(x_dims=1)
 
-        model = knp.CNP(x_dims=1)
+        if model_class == knp.CNP:
+            # CNP returns mean and std directly
+            mean, std = model([context_x, context_y, target_x])
+            assert mean.shape == target_y.shape
+            assert std.shape == target_y.shape
+            assert ops.all(std > 0)
+        else:
+            # NP and ANP return distributions
+            # Test training pass
+            pred_dist_train, prior_train, posterior_train = model(
+                [context_x, context_y, target_x, target_y], training=True
+            )
+            assert pred_dist_train.mean().shape == target_y.shape
+            assert pred_dist_train.stddev().shape == target_y.shape
+            assert prior_train is not None
+            assert posterior_train is not None
 
-        # Forward pass
-        mean, std = model([context_x, context_y, target_x])
-
-        assert mean.shape == target_y.shape
-        assert std.shape == target_y.shape
-        assert ops.all(std > 0)  # Standard deviation should be positive
-
-    def test_np_build_and_call(self, context_target_data):
-        """Test NP build and forward pass."""
-        context_x, context_y, target_x, target_y = context_target_data
-
-        model = knp.NP(x_dims=1)
-
-        # Forward pass during training
-        pred_dist, prior_dist, posterior_dist = model(
-            [context_x, context_y, target_x, target_y], training=True
-        )
-
-        assert pred_dist.mean().shape == target_y.shape
-        assert pred_dist.stddev().shape == target_y.shape
-        assert prior_dist is not None
-        assert posterior_dist is not None
-
-        # Forward pass during inference
-        pred_dist_test, prior_dist_test, posterior_dist_test = model(
-            [context_x, context_y, target_x, None], training=False
-        )
-
-        assert pred_dist_test.mean().shape == target_y.shape
-        assert pred_dist_test.stddev().shape == target_y.shape
-        assert prior_dist_test is not None
-        assert posterior_dist_test is None  # Should be None during inference
-
-    def test_anp_build_and_call(self, context_target_data):
-        """Test ANP build and forward pass."""
-        context_x, context_y, target_x, target_y = context_target_data
-
-        model = knp.ANP(x_dims=1)
-
-        # Forward pass during training
-        pred_dist, prior_dist, posterior_dist = model(
-            [context_x, context_y, target_x, target_y], training=True
-        )
-
-        assert pred_dist.mean().shape == target_y.shape
-        assert pred_dist.stddev().shape == target_y.shape
-        assert prior_dist is not None
-        assert posterior_dist is not None
+            # Test inference pass
+            pred_dist_test, prior_test, posterior_test = model(
+                [context_x, context_y, target_x, None], training=False
+            )
+            assert pred_dist_test.mean().shape == target_y.shape
+            assert pred_dist_test.stddev().shape == target_y.shape
+            assert prior_test is not None
+            # Posterior should be None during inference
+            assert posterior_test is None
 
 
 # Tests for individual layers
@@ -296,49 +261,10 @@ class TestUtilityFunctions:
 
 # Tests for training methods
 class TestTrainingMethods:
-
-    def test_cnp_train_step(self, context_target_data):
-        """Test CNP train_step method."""
+    def test_model_train_step(self, model_class, context_target_data):
+        """Test the train_step method for all model types."""
         context_x, context_y, target_x, target_y = context_target_data
-
-        model = knp.CNP(x_dims=1)
-
-        optimizer = keras.optimizers.Adam(learning_rate=1e-3)
-        model.optimizer = optimizer
-
-        # Manually prepare data to match the expected signature for the raw train_step
-        context_x_prep = model._prepare_x(context_x)
-        context_y_prep = model._prepare_y(context_y)
-        target_x_prep = model._prepare_x(target_x)
-        target_y_prep = model._prepare_y(target_y)
-
-        logs = model.train_step(
-            context_x_prep, context_y_prep, target_x_prep, target_y_prep
-        )
-
-        assert "loss" in logs
-        loss_val = logs["loss"]
-        assert isinstance(loss_val, tf.Tensor)
-        assert not tf.math.is_nan(loss_val)
-
-    def test_cnp_test_step(self, context_target_data):
-        """Test CNP test_step/predict method."""
-        context_x, context_y, target_x, _ = context_target_data
-
-        model = knp.CNP(x_dims=1)
-
-        pred_mean, pred_std = model.predict(context_x, context_y, target_x)
-
-        assert pred_mean.shape == target_x.shape
-        assert pred_std.shape == target_x.shape
-        assert ops.all(pred_std > 0)
-
-    def test_np_train_step(self, context_target_data):
-        """Test NP train_step method."""
-        context_x, context_y, target_x, target_y = context_target_data
-
-        model = knp.NP(x_dims=1)
-
+        model = model_class(x_dims=1)
         optimizer = keras.optimizers.Adam(learning_rate=1e-3)
         model.optimizer = optimizer
 
@@ -353,11 +279,25 @@ class TestTrainingMethods:
         )
 
         assert "loss" in logs
-        assert "recon_loss" in logs
-        assert "kl_div" in logs
         assert not tf.math.is_nan(logs["loss"])
-        assert not tf.math.is_nan(logs["recon_loss"])
-        assert not tf.math.is_nan(logs["kl_div"])
+
+        if model_class in [knp.NP, knp.ANP]:
+            assert "recon_loss" in logs
+            assert "kl_div" in logs
+            assert not tf.math.is_nan(logs["recon_loss"])
+            assert not tf.math.is_nan(logs["kl_div"])
+
+    def test_cnp_test_step(self, context_target_data):
+        """Test CNP test_step/predict method."""
+        context_x, context_y, target_x, _ = context_target_data
+
+        model = knp.CNP(x_dims=1)
+
+        pred_mean, pred_std = model.predict(context_x, context_y, target_x)
+
+        assert pred_mean.shape == target_x.shape
+        assert pred_std.shape == target_x.shape
+        assert ops.all(pred_std > 0)
 
 
 # Tests for error handling and edge cases
@@ -604,9 +544,8 @@ class TestTensorVsNumpyInputs:
 
 # Tests for different input/output dimensions
 class TestDifferentDimensions:
-
-    def test_multi_output_cnp(self):
-        """Test CNP with multi-dimensional output."""
+    def test_multi_output(self, model_class):
+        """Test models with multi-dimensional output."""
         batch_size = 2
         num_context = 5
         num_targets = 10
@@ -616,41 +555,9 @@ class TestDifferentDimensions:
         context_x = np.random.randn(batch_size, num_context, x_dim).astype(np.float32)
         context_y = np.random.randn(batch_size, num_context, y_dim).astype(np.float32)
         target_x = np.random.randn(batch_size, num_targets, x_dim).astype(np.float32)
-
-        model = knp.CNP(x_dims=x_dim, y_dims=y_dim)
-        optimizer = keras.optimizers.Adam()
-        model.optimizer = optimizer
-
-        # Test predict
-        mean, std = model.predict(context_x, context_y, target_x)
-        assert mean.shape == (batch_size, num_targets, y_dim)
-        assert std.shape == (batch_size, num_targets, y_dim)
-
-        assert mean.shape == (batch_size, num_targets, y_dim)
-        assert std.shape == (batch_size, num_targets, y_dim)
-
-        # # Test train_step
-        # context_x = model._prepare_x(context_x)
-        # context_y = model._prepare_y(context_y)
-        # target_x = model._prepare_x(target_x)
-        # target_y = model._prepare_y(target_y)
-        # logs = model.train_step(context_x, context_y, target_x, target_y)
-        # assert "loss" in logs
-
-    def test_multi_output_np(self):
-        """Test NP with multi-dimensional output."""
-        batch_size = 2
-        num_context = 5
-        num_targets = 10
-        x_dim = 1
-        y_dim = 3
-
-        context_x = np.random.randn(batch_size, num_context, x_dim).astype(np.float32)
-        context_y = np.random.randn(batch_size, num_context, y_dim).astype(np.float32)
-        target_x = np.random.randn(batch_size, num_targets, x_dim).astype(np.float32)
         target_y = np.random.randn(batch_size, num_targets, y_dim).astype(np.float32)
 
-        model = knp.NP(x_dims=x_dim, y_dims=y_dim)
+        model = model_class(x_dims=x_dim, y_dims=y_dim)
         optimizer = keras.optimizers.Adam()
         model.optimizer = optimizer
 
@@ -659,47 +566,16 @@ class TestDifferentDimensions:
         assert mean.shape == (batch_size, num_targets, y_dim)
         assert std.shape == (batch_size, num_targets, y_dim)
 
-        # Test train_step
-        context_x_prep = model._prepare_x(context_x)
-        context_y_prep = model._prepare_y(context_y)
-        target_x_prep = model._prepare_x(target_x)
-        target_y_prep = model._prepare_y(target_y)
-        logs = model.train_step(
-            context_x_prep, context_y_prep, target_x_prep, target_y_prep
-        )
-        assert "loss" in logs
-
-    def test_multi_output_anp(self):
-        """Test ANP with multi-dimensional output."""
-        batch_size = 2
-        num_context = 5
-        num_targets = 10
-        x_dim = 1
-        y_dim = 3
-
-        context_x = np.random.randn(batch_size, num_context, x_dim).astype(np.float32)
-        context_y = np.random.randn(batch_size, num_context, y_dim).astype(np.float32)
-        target_x = np.random.randn(batch_size, num_targets, x_dim).astype(np.float32)
-        target_y = np.random.randn(batch_size, num_targets, y_dim).astype(np.float32)
-
-        model = knp.ANP(x_dims=x_dim, y_dims=y_dim)
-        optimizer = keras.optimizers.Adam()
-        model.optimizer = optimizer
-
-        # Test predict
-        mean, std = model.predict(context_x, context_y, target_x)
-        assert mean.shape == (batch_size, num_targets, y_dim)
-        assert std.shape == (batch_size, num_targets, y_dim)
-
-        # Test train_step
-        context_x_prep = model._prepare_x(context_x)
-        context_y_prep = model._prepare_y(context_y)
-        target_x_prep = model._prepare_x(target_x)
-        target_y_prep = model._prepare_y(target_y)
-        logs = model.train_step(
-            context_x_prep, context_y_prep, target_x_prep, target_y_prep
-        )
-        assert "loss" in logs
+        # Test train_step for models that support it in this configuration
+        if model_class in [knp.NP, knp.ANP]:
+            context_x_prep = model._prepare_x(context_x)
+            context_y_prep = model._prepare_y(context_y)
+            target_x_prep = model._prepare_x(target_x)
+            target_y_prep = model._prepare_y(target_y)
+            logs = model.train_step(
+                context_x_prep, context_y_prep, target_x_prep, target_y_prep
+            )
+            assert "loss" in logs
 
     def test_multi_input_cnp(self):
         """Test CNP with multi-dimensional input."""
@@ -804,10 +680,10 @@ class TestIntegration:
 
 
 class TestModelBehavior:
-    def test_cnp_training_flag(self, context_target_data):
-        """Test that the training flag is passed correctly in CNP."""
-        context_x, context_y, target_x, _ = context_target_data
-        model = knp.CNP(x_dims=1)
+    def test_model_training_flag(self, model_class, context_target_data):
+        """Test that the training flag is passed correctly in all models."""
+        context_x, context_y, target_x, target_y = context_target_data
+        model = model_class(x_dims=1)
 
         # Mock the call method to check the training argument
         original_call = model.call
@@ -824,7 +700,6 @@ class TestModelBehavior:
         context_x_prep = model._prepare_x(context_x)
         context_y_prep = model._prepare_y(context_y)
         target_x_prep = model._prepare_x(target_x)
-        # Dummy y must have same num_points as target_x
         target_y_prep = model._prepare_y(
             np.random.randn(*target_x.shape).astype(np.float32)
         )
@@ -832,56 +707,5 @@ class TestModelBehavior:
         assert call_args.get("training") is True
 
         # Test during predict
-        model.predict(context_x, context_y, target_x)
-        assert call_args.get("training") is False
-
-    def test_np_training_flag(self, context_target_data):
-        """Test that the training flag is passed correctly in NP."""
-        context_x, context_y, target_x, target_y = context_target_data
-        model = knp.NP(x_dims=1)
-
-        # As above, mock call to inspect arguments
-        original_call = model.call
-        call_args = {}
-
-        def mocked_call(*args, **kwargs):
-            call_args.update(kwargs)
-            return original_call(*args, **kwargs)
-
-        model.call = mocked_call
-
-        model.optimizer = keras.optimizers.Adam()
-        context_x_prep = model._prepare_x(context_x)
-        context_y_prep = model._prepare_y(context_y)
-        target_x_prep = model._prepare_x(target_x)
-        target_y_prep = model._prepare_y(target_y)
-        model.train_step(context_x_prep, context_y_prep, target_x_prep, target_y_prep)
-        assert call_args.get("training") is True
-
-        model.predict(context_x, context_y, target_x)
-        assert call_args.get("training") is False
-
-    def test_anp_training_flag(self, context_target_data):
-        """Test that the training flag is passed correctly in ANP."""
-        context_x, context_y, target_x, target_y = context_target_data
-        model = knp.ANP(x_dims=1)
-
-        original_call = model.call
-        call_args = {}
-
-        def mocked_call(*args, **kwargs):
-            call_args.update(kwargs)
-            return original_call(*args, **kwargs)
-
-        model.call = mocked_call
-
-        model.optimizer = keras.optimizers.Adam()
-        context_x_prep = model._prepare_x(context_x)
-        context_y_prep = model._prepare_y(context_y)
-        target_x_prep = model._prepare_x(target_x)
-        target_y_prep = model._prepare_y(target_y)
-        model.train_step(context_x_prep, context_y_prep, target_x_prep, target_y_prep)
-        assert call_args.get("training") is True
-
         model.predict(context_x, context_y, target_x)
         assert call_args.get("training") is False

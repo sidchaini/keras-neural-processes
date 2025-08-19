@@ -5,30 +5,53 @@ import keras_neural_processes as knp
 from unittest.mock import MagicMock
 
 
-class TestCNPTraining:
-
-    def test_cnp_train_method_basic(self, sample_gp_data_with_val):
-        """Test the basic training loop of a CNP model."""
+class TestModelTraining:
+    def test_model_train_method_basic(self, model_class, sample_gp_data_with_val):
+        """Test the basic training loop of a model."""
         X_train, y_train, _, _ = sample_gp_data_with_val
-        model = knp.CNP(
-            encoder_sizes=[64, 64],
-            decoder_sizes=[64, 64],
-            x_dims=1,
-            y_dims=1,
-        )
+
+        # Minimal model configuration for testing
+        if model_class == knp.CNP:
+            model = model_class(
+                encoder_sizes=[32, 32], decoder_sizes=[32, 32], x_dims=1, y_dims=1
+            )
+        elif model_class == knp.NP:
+            model = model_class(
+                det_encoder_sizes=[32, 32],
+                latent_encoder_sizes=[32, 32],
+                decoder_sizes=[32, 32],
+                x_dims=1,
+                y_dims=1,
+            )
+        else:  # ANP
+            model = model_class(
+                att_encoder_sizes=[32, 32],
+                latent_encoder_sizes=[32, 32],
+                decoder_sizes=[32, 32],
+                x_dims=1,
+                y_dims=1,
+            )
+
         optimizer = keras.optimizers.Adam(learning_rate=1e-3)
         history = model.train(
             X_train,
             y_train,
-            epochs=3,
+            epochs=2,
             optimizer=optimizer,
             pbar=False,
             plotcb=False,
             num_context_mode="all",
         )
+
         assert "loss" in history.history
-        assert len(history.history["loss"]) == 3
+        assert len(history.history["loss"]) == 2
         assert np.all(np.isfinite(history.history["loss"]))
+
+        if model_class in [knp.NP, knp.ANP]:
+            assert "recon_loss" in history.history
+            assert "kl_div" in history.history
+            assert np.all(np.isfinite(history.history["recon_loss"]))
+            assert np.all(np.isfinite(history.history["kl_div"]))
 
     def test_cnp_train_with_validation(self, sample_gp_data_with_val):
         """Test training with a validation set and plotting callback."""

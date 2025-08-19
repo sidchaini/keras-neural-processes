@@ -1,6 +1,8 @@
 import numpy as np
 import pytest
 
+import keras_neural_processes as knp
+
 
 def generate_gp_data(batch_size, num_points, x_range=(-2, 2), noise_std=0.02):
     """Helper to generate 1D Gaussian Process data."""
@@ -8,6 +10,12 @@ def generate_gp_data(batch_size, num_points, x_range=(-2, 2), noise_std=0.02):
     x = np.repeat(x, batch_size, axis=0)
     y = np.sin(x * np.pi) + np.random.normal(scale=noise_std, size=x.shape)
     return x.astype(np.float32), y.astype(np.float32)
+
+
+@pytest.fixture(params=[knp.CNP, knp.NP, knp.ANP])
+def model_class(request):
+    """Provides a model class (CNP, NP, or ANP) for parameterization."""
+    return request.param
 
 
 # --- Shared data fixtures for tests ---
