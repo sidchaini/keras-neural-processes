@@ -20,12 +20,9 @@ class TestModelInstantiation:
 
     def test_cnp_custom_params(self):
         """Test CNP with custom parameters."""
-        model = knp.CNP(
-            encoder_sizes=[64, 64], decoder_sizes=[32, 32], x_dims=2, y_dims=2
-        )
+        model = knp.CNP(encoder_sizes=[64, 64], decoder_sizes=[32, 32], y_dims=2)
         assert model.encoder_sizes == [64, 64]
         assert model.decoder_sizes == [32, 32]
-        assert model.x_dims == 2
         assert model.y_dims == 2
 
     def test_np_custom_params(self):
@@ -35,14 +32,12 @@ class TestModelInstantiation:
             latent_encoder_sizes=[32, 32],
             num_latents=64,
             decoder_sizes=[16, 16],
-            x_dims=2,
             y_dims=2,
         )
         assert model.det_encoder_sizes == [64, 64]
         assert model.latent_encoder_sizes == [32, 32]
         assert model.num_latents == 64
         assert model.decoder_sizes == [16, 16]
-        assert model.x_dims == 2
         assert model.y_dims == 2
 
     def test_anp_custom_params(self):
@@ -53,7 +48,6 @@ class TestModelInstantiation:
             latent_encoder_sizes=[32, 32],
             num_latents=64,
             decoder_sizes=[16, 16],
-            x_dims=2,
             y_dims=2,
         )
         assert model.att_encoder_sizes == [64, 64]
@@ -61,7 +55,6 @@ class TestModelInstantiation:
         assert model.latent_encoder_sizes == [32, 32]
         assert model.num_latents == 64
         assert model.decoder_sizes == [16, 16]
-        assert model.x_dims == 2
         assert model.y_dims == 2
 
 
@@ -70,7 +63,7 @@ class TestModelFunctionality:
     def test_model_build_and_call(self, model_class, context_target_data):
         """Test model build and forward pass for all model types."""
         context_x, context_y, target_x, target_y = context_target_data
-        model = model_class(x_dims=1)
+        model = model_class()
 
         if model_class == knp.CNP:
             # CNP returns mean and std directly
@@ -264,7 +257,7 @@ class TestTrainingMethods:
     def test_model_train_step(self, model_class, context_target_data):
         """Test the train_step method for all model types."""
         context_x, context_y, target_x, target_y = context_target_data
-        model = model_class(x_dims=1)
+        model = model_class()
         optimizer = keras.optimizers.Adam(learning_rate=1e-3)
         model.optimizer = optimizer
 
@@ -291,7 +284,7 @@ class TestTrainingMethods:
         """Test CNP test_step/predict method."""
         context_x, context_y, target_x, _ = context_target_data
 
-        model = knp.CNP(x_dims=1)
+        model = knp.CNP()
 
         pred_mean, pred_std = model.predict(context_x, context_y, target_x)
 
@@ -304,7 +297,7 @@ class TestTrainingMethods:
 class TestErrorHandling:
     def test_incompatible_shapes_predict(self):
         """Test error handling for incompatible shapes in predict."""
-        model = knp.CNP(x_dims=1)
+        model = knp.CNP()
 
         # Test mismatched context_x and context_y batch dimensions
         context_x = np.random.randn(2, 10, 1).astype(np.float32)
@@ -316,7 +309,7 @@ class TestErrorHandling:
 
     def test_incompatible_shapes_train(self):
         """Test error handling for incompatible shapes in train."""
-        model = knp.CNP(x_dims=1)
+        model = knp.CNP()
         optimizer = keras.optimizers.Adam()
 
         # Mismatched samples
@@ -326,19 +319,9 @@ class TestErrorHandling:
         with pytest.raises(ValueError, match="same number of samples and points"):
             model.train(x_train, y_train, epochs=1, optimizer=optimizer)
 
-    def test_invalid_x_shape_strict(self):
-        """Test error for invalid x shape when auto-reshaping is off."""
-        model = knp.CNP(x_dims=3)  # Model expects 3D x
-        context_x = np.random.randn(2, 10, 2).astype(np.float32)  # Data is 2D
-        context_y = np.random.randn(2, 10, 1).astype(np.float32)
-        pred_x = np.random.randn(2, 20, 2).astype(np.float32)
-
-        with pytest.raises(ValueError, match="must have shape \\(..., 3\\)"):
-            model.predict(context_x, context_y, pred_x)
-
     def test_invalid_y_shape(self):
         """Test error for invalid y shape (not matching y_dims)."""
-        model = knp.CNP(x_dims=1, y_dims=1)
+        model = knp.CNP(y_dims=1)
         context_x = np.random.randn(2, 10, 1).astype(np.float32)
         context_y = np.random.randn(2, 10, 2).astype(np.float32)  # y is 2D
         pred_x = np.random.randn(2, 20, 1).astype(np.float32)
@@ -372,14 +355,11 @@ class TestModelSerialization:
 
     def test_cnp_get_config(self):
         """Test CNP get_config method."""
-        model = knp.CNP(
-            encoder_sizes=[64, 32], decoder_sizes=[32, 16], x_dims=2, y_dims=2
-        )
+        model = knp.CNP(encoder_sizes=[64, 32], decoder_sizes=[32, 16], y_dims=2)
         config = model.get_config()
 
         assert config["encoder_sizes"] == [64, 32]
         assert config["decoder_sizes"] == [32, 16]
-        assert config["x_dims"] == 2
         assert config["y_dims"] == 2
 
     def test_np_get_config(self):
@@ -389,7 +369,6 @@ class TestModelSerialization:
             latent_encoder_sizes=[32, 16],
             num_latents=64,
             decoder_sizes=[32, 16],
-            x_dims=2,
             y_dims=2,
         )
         config = model.get_config()
@@ -398,7 +377,6 @@ class TestModelSerialization:
         assert config["latent_encoder_sizes"] == [32, 16]
         assert config["num_latents"] == 64
         assert config["decoder_sizes"] == [32, 16]
-        assert config["x_dims"] == 2
         assert config["y_dims"] == 2
 
     def test_anp_get_config(self):
@@ -409,7 +387,6 @@ class TestModelSerialization:
             latent_encoder_sizes=[32, 16],
             num_latents=64,
             decoder_sizes=[32, 16],
-            x_dims=2,
             y_dims=2,
         )
         config = model.get_config()
@@ -419,7 +396,6 @@ class TestModelSerialization:
         assert config["latent_encoder_sizes"] == [32, 16]
         assert config["num_latents"] == 64
         assert config["decoder_sizes"] == [32, 16]
-        assert config["x_dims"] == 2
         assert config["y_dims"] == 2
 
 
@@ -514,8 +490,8 @@ class TestTensorVsNumpyInputs:
         context_y_tf = tf.constant(context_y)
         target_x_tf = tf.constant(target_x)
 
-        xdim, ydim = context_x.shape[2], context_y.shape[2]
-        model = knp.CNP(x_dims=xdim, y_dims=ydim)
+        ydim = context_y.shape[2]
+        model = knp.CNP(y_dims=ydim)
 
         mean, std = model([context_x_tf, context_y_tf, target_x_tf])
 
@@ -557,7 +533,7 @@ class TestDifferentDimensions:
         target_x = np.random.randn(batch_size, num_targets, x_dim).astype(np.float32)
         target_y = np.random.randn(batch_size, num_targets, y_dim).astype(np.float32)
 
-        model = model_class(x_dims=x_dim, y_dims=y_dim)
+        model = model_class(y_dims=y_dim)
         optimizer = keras.optimizers.Adam()
         model.optimizer = optimizer
 
@@ -589,7 +565,7 @@ class TestDifferentDimensions:
         context_y = np.random.randn(batch_size, num_context, y_dim).astype(np.float32)
         target_x = np.random.randn(batch_size, num_targets, x_dim).astype(np.float32)
 
-        model = knp.CNP(x_dims=x_dim, y_dims=y_dim)
+        model = knp.CNP(y_dims=y_dim)
 
         mean, std = model.predict(context_x, context_y, target_x)
 
@@ -608,17 +584,12 @@ class TestDifferentDimensions:
         context_y = np.random.randn(batch_size, num_context, y_dim).astype(np.float32)
         target_x = np.random.randn(batch_size, num_targets, x_dim).astype(np.float32)
 
-        model = knp.CNP(x_dims=x_dim, y_dims=y_dim)
+        model = knp.CNP(y_dims=y_dim)
 
         # This should work fine
         mean, std = model.predict(context_x, context_y, target_x)
         assert mean.shape == (batch_size, num_targets, y_dim)
         assert std.shape == (batch_size, num_targets, y_dim)
-
-        # This should fail because the last dim is not x_dim
-        bad_context_x = np.random.randn(batch_size, num_context, 1).astype(np.float32)
-        with pytest.raises(ValueError, match=f"must have shape \\(..., {x_dim}\\)"):
-            model.predict(bad_context_x, context_y, target_x)
 
 
 # Integration tests
@@ -628,7 +599,7 @@ class TestIntegration:
         """Test complete training workflow for CNP."""
         x, y = sample_data_1d
 
-        model = knp.CNP(encoder_sizes=[32, 32], decoder_sizes=[16, 16], x_dims=1)
+        model = knp.CNP(encoder_sizes=[32, 32], decoder_sizes=[16, 16])
         optimizer = keras.optimizers.Adam(learning_rate=1e-3)
 
         history = model.train(
@@ -656,26 +627,20 @@ class TestIntegration:
 
     def test_model_saving_and_loading(self, tmp_path):
         """Test that models can be saved and loaded."""
-        model = knp.CNP(
-            encoder_sizes=[32, 32], decoder_sizes=[16, 16], x_dims=1, y_dims=1
-        )
+        model = knp.CNP(encoder_sizes=[32, 32], decoder_sizes=[16, 16], y_dims=1)
         model.save(tmp_path / "model.keras")
         loaded_model = keras.saving.load_model(tmp_path / "model.keras")
 
         assert loaded_model.encoder_sizes == [32, 32]
         assert loaded_model.decoder_sizes == [16, 16]
-        assert loaded_model.x_dims == 1
         assert loaded_model.y_dims == 1
 
     def test_model_saving_and_loading_custom_dims(self, tmp_path):
-        """Test saving/loading with custom x_dims and y_dims."""
-        model = knp.CNP(
-            encoder_sizes=[32, 32], decoder_sizes=[16, 16], x_dims=3, y_dims=4
-        )
+        """Test saving/loading with custom y_dims."""
+        model = knp.CNP(encoder_sizes=[32, 32], decoder_sizes=[16, 16], y_dims=4)
         model.save(tmp_path / "model.keras")
         loaded_model = keras.saving.load_model(tmp_path / "model.keras")
 
-        assert loaded_model.x_dims == 3
         assert loaded_model.y_dims == 4
 
 
@@ -683,7 +648,7 @@ class TestModelBehavior:
     def test_model_training_flag(self, model_class, context_target_data):
         """Test that the training flag is passed correctly in all models."""
         context_x, context_y, target_x, target_y = context_target_data
-        model = model_class(x_dims=1)
+        model = model_class()
 
         # Mock the call method to check the training argument
         original_call = model.call

@@ -13,14 +13,13 @@ class TestModelTraining:
         # Minimal model configuration for testing
         if model_class == knp.CNP:
             model = model_class(
-                encoder_sizes=[32, 32], decoder_sizes=[32, 32], x_dims=1, y_dims=1
+                encoder_sizes=[32, 32], decoder_sizes=[32, 32], y_dims=1
             )
         elif model_class == knp.NP:
             model = model_class(
                 det_encoder_sizes=[32, 32],
                 latent_encoder_sizes=[32, 32],
                 decoder_sizes=[32, 32],
-                x_dims=1,
                 y_dims=1,
             )
         else:  # ANP
@@ -28,7 +27,6 @@ class TestModelTraining:
                 att_encoder_sizes=[32, 32],
                 latent_encoder_sizes=[32, 32],
                 decoder_sizes=[32, 32],
-                x_dims=1,
                 y_dims=1,
             )
 
@@ -59,7 +57,6 @@ class TestModelTraining:
         model = knp.CNP(
             encoder_sizes=[32, 32],
             decoder_sizes=[32, 32],
-            x_dims=1,
             y_dims=1,
         )
         optimizer = keras.optimizers.Adam()
@@ -79,7 +76,7 @@ class TestModelTraining:
     def test_cnp_train_different_context_modes(self, sample_gp_data_with_val):
         """Test that training runs with different context sampling modes."""
         X_train, y_train, _, _ = sample_gp_data_with_val
-        model = knp.CNP(x_dims=1, y_dims=1)
+        model = knp.CNP(y_dims=1)
         optimizer = keras.optimizers.Adam()
 
         # Test with 'all' mode
@@ -105,7 +102,6 @@ class TestNPTraining:
             det_encoder_sizes=[32, 32],
             latent_encoder_sizes=[32, 32],
             decoder_sizes=[32, 32],
-            x_dims=1,
             y_dims=1,
         )
         optimizer = keras.optimizers.Adam()
@@ -138,7 +134,6 @@ class TestANPTraining:
             att_encoder_sizes=[32, 32],
             latent_encoder_sizes=[32, 32],
             decoder_sizes=[32, 32],
-            x_dims=1,
             y_dims=1,
         )
         optimizer = keras.optimizers.Adam()
@@ -162,7 +157,7 @@ class TestTrainingParameters:
     def test_training_with_different_batch_sizes(self, sample_gp_data_with_val):
         """Test that training respects different batch sizes."""
         X_train, y_train, _, _ = sample_gp_data_with_val
-        model = knp.CNP(x_dims=1, y_dims=1)
+        model = knp.CNP(y_dims=1)
         optimizer = keras.optimizers.Adam()
 
         # Larger batch size
@@ -195,7 +190,7 @@ class TestTrainingParameters:
     def test_training_with_different_context_ranges(self, sample_gp_data_with_val):
         """Test that training works with different context point ranges."""
         X_train, y_train, _, _ = sample_gp_data_with_val
-        model = knp.CNP(x_dims=1, y_dims=1)
+        model = knp.CNP(y_dims=1)
         optimizer = keras.optimizers.Adam()
 
         # Single number for num_context_range
@@ -230,7 +225,7 @@ class TestTrainingValidation:
     def test_training_assertions(self, sample_gp_data_with_val):
         """Test assertions for invalid training configurations."""
         X_train, y_train, X_val, y_val = sample_gp_data_with_val
-        model = knp.CNP(x_dims=1, y_dims=1)
+        model = knp.CNP(y_dims=1)
         optimizer = keras.optimizers.Adam()
 
         # Should fail if plotcb is True but no validation data is provided
@@ -248,7 +243,7 @@ class TestTrainingValidation:
     def test_pred_points_default_setting(self, sample_gp_data_with_val):
         """Test that pred_points defaults correctly when not provided."""
         X_train, y_train, X_val, y_val = sample_gp_data_with_val
-        model = knp.CNP(x_dims=1, y_dims=1)
+        model = knp.CNP(y_dims=1)
         optimizer = keras.optimizers.Adam()
 
         # This should work without explicitly setting pred_points
@@ -275,7 +270,7 @@ class TestProgressTracking:
     def test_training_with_progress_bar(self, sample_gp_data_with_val, mocker):
         """Test that the progress bar is used when pbar=True."""
         X_train, y_train, _, _ = sample_gp_data_with_val
-        model = knp.CNP(x_dims=1, y_dims=1)
+        model = knp.CNP(y_dims=1)
         optimizer = keras.optimizers.Adam()
 
         mock_progbar = mocker.patch("keras_neural_processes.src.Progbar")
@@ -307,7 +302,7 @@ class TestProgressTracking:
     def test_callbacks_integration(self, sample_gp_data_with_val, mocker):
         """Test that Keras callbacks are correctly integrated."""
         X_train, y_train, _, _ = sample_gp_data_with_val
-        model = knp.CNP(x_dims=1, y_dims=1)
+        model = knp.CNP(y_dims=1)
         optimizer = keras.optimizers.Adam()
 
         mock_callback_list = mocker.patch(
@@ -339,7 +334,7 @@ class TestSeedHandling:
     def test_training_reproducibility_with_seed(self, sample_gp_data_with_val, mocker):
         """Test that training is reproducible when a seed is provided for validation."""
         X_train, y_train, X_val, y_val = sample_gp_data_with_val
-        model = knp.CNP(x_dims=1, y_dims=1)
+        model = knp.CNP(y_dims=1)
         optimizer = keras.optimizers.Adam()
 
         # Mock the plotting function to capture the seed it receives
