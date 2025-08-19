@@ -10,21 +10,6 @@ from . import utils
 
 
 # =============================================================================
-# 0. INPUT SIGNATURES
-# =============================================================================
-# Assuming long format, i.e.,
-# for x: (n_samples, n_points_total, 2)
-#       where 2 for [x_value, channel_id]
-# for y: (n_samples, n_points_total, 1)
-#       where 1 for [y_value]
-X_SPEC = tf.TensorSpec(shape=[None, None, 2], dtype="float32")
-Y_SPEC = tf.TensorSpec(shape=[None, None, 1], dtype="float32")
-
-TRAIN_SIGNATURE = [X_SPEC, Y_SPEC, X_SPEC, Y_SPEC]
-TEST_SIGNATURE = [X_SPEC, Y_SPEC, X_SPEC]
-
-
-# =============================================================================
 # 1. COMPONENT LAYERS (THE BUILDING BLOCKS)
 # =============================================================================
 @keras.saving.register_keras_serializable()
@@ -250,23 +235,56 @@ class BaseNeuralProcess(keras.Model):
     - `test_step(self, ...)`: To define the inference logic.
     """
 
-    def _compile_step_functions(self):
-        """
-        Compile train_step and test_step with a dynamic signature
-        based on the model's y_dims.
-        """
-        x_spec = tf.TensorSpec(shape=[None, None, self.x_dims], dtype="float32")
-        y_spec = tf.TensorSpec(shape=[None, None, self.y_dims], dtype="float32")
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        # Placeholders for the dynamically compiled functions
+        self._x_spec = None
+        self._y_spec = None
+        self._compiled_train_step = None
+        self._compiled_test_step = None
 
-        train_signature = [x_spec, y_spec, x_spec, y_spec]  # (xc, yc, xt, yt)
-        test_signature = [x_spec, y_spec, x_spec]  # (xc, yc, xt)
+    def _initialize_specs(self, x, y):
+        """Create TensorSpecs for x and y if they don't exist."""
+        if self._x_spec is None:
+            self._x_spec = tf.TensorSpec(shape=[None, None, x.shape[2]], dtype=x.dtype)
+        if self._y_spec is None:
+            self._y_spec = tf.TensorSpec(shape=[None, None, y.shape[2]], dtype=y.dtype)
 
-        self.train_step = tf.function(
-            self.train_step, input_signature=train_signature, jit_compile=True
-        )
-        self.test_step = tf.function(
-            self.test_step, input_signature=test_signature, jit_compile=True
-        )
+    def train_step(self, context_x, context_y, target_x, target_y):
+        """
+        Public-facing train_step wrapper.
+        Compiles the graph on the first call and reuses it for subsequent calls.
+        """
+
+        if self._compiled_train_step is None:
+            self._initialize_specs(context_x, context_y)
+            train_signature = [self._x_spec, self._y_spec, self._x_spec, self._y_spec]
+
+            # Compile the internal logic method provided by the Mixin class.
+            self._compiled_train_step = tf.function(
+                self._train_step_logic,
+                input_signature=train_signature,
+                jit_compile=True,
+            )
+
+        # Call the compiled function for this and all future steps.
+        return self._compiled_train_step(context_x, context_y, target_x, target_y)
+
+    def test_step(self, context_x, context_y, pred_x):
+        """
+        Public-facing test_step wrapper.
+        Compiles the graph on the first call and reuses it.
+        """
+        if self._compiled_test_step is None:
+            self._initialize_specs(context_x, context_y)
+            test_signature = [self._x_spec, self._y_spec, self._x_spec]
+
+            # Compile the internal logic method provided by the Mixin class.
+            self._compiled_test_step = tf.function(
+                self._test_step_logic, input_signature=test_signature, jit_compile=True
+            )
+
+        return self._compiled_test_step(context_x, context_y, pred_x)
 
     def _prepare_x(self, X, name="X"):
         """
@@ -278,18 +296,6 @@ class BaseNeuralProcess(keras.Model):
             raise ValueError(
                 f"{name} must be a 3D tensor, but got {len(X.shape)} dims."
             )
-
-        # if X.shape[-1] == 1:
-        #     warnings.warn(
-        #         f"Input '{name}' has shape {X.shape}, suggesting 1D x-values. "
-        #         "It will be automatically reshaped to (..., 2) by adding a "
-        #         "default channel ID of 0 for all points. If this is not the "
-        #         "intended behavior, please reshape your data manually.",
-        #         UserWarning,
-        #     )
-        #     # Add a channel of zeros
-        #     zeros = ops.zeros_like(X)
-        #     X = ops.concatenate([X, zeros], axis=-1)
 
         if X.shape[-1] != self.x_dims:
             raise ValueError(
@@ -400,7 +406,7 @@ class BaseNeuralProcess(keras.Model):
             target_x_train, target_y_train = X_train_batch, y_train_batch
 
             # --- Perform a single training step ---
-            # This will call the specific train_step of CNP, NP, or ANP
+            # This will call the specific train_step wrapper
             logs = self.train_step(
                 context_x_train, context_y_train, target_x_train, target_y_train
             )
@@ -431,10 +437,11 @@ class BaseNeuralProcess(keras.Model):
 
 class ConditionalModelMixin:
     """
-    Docstring
+    Mixin for deterministic models like CNP.
+    Provides the core training and testing logic.
     """
 
-    def train_step(self, context_x, context_y, target_x, target_y):
+    def _train_step_logic(self, context_x, context_y, target_x, target_y):
         with tf.GradientTape() as tape:
             mean, std = self((context_x, context_y, target_x), training=True)
             # The loss is the negative log-likelihood of the targets
@@ -445,19 +452,18 @@ class ConditionalModelMixin:
         self.optimizer.apply(grads, self.trainable_weights)
         return {"loss": loss_value}
 
-    def test_step(self, context_x, context_y, pred_x):
+    def _test_step_logic(self, context_x, context_y, pred_x):
         mean, std = self((context_x, context_y, pred_x), training=False)
         return mean, std
 
 
 class LatentModelMixin:
     """
-    A mixin class providing the shared ELBO-based train_step and test_step
-    for latent variable models like NP and ANP. A mixin class provides
-    methods to other classes but is not meant to be instantiated on its own.
+    A mixin class providing the shared ELBO-based logic
+    for latent variable models like NP and ANP.
     """
 
-    def train_step(self, context_x, context_y, target_x, target_y):
+    def _train_step_logic(self, context_x, context_y, target_x, target_y):
         with tf.GradientTape() as tape:
             # The `call` method of NP/ANP returns the predictive distribution,
             # and the prior/posterior distributions for the latent variable z.
@@ -487,7 +493,7 @@ class LatentModelMixin:
 
         return {"loss": loss_value, "recon_loss": reconstruction_loss, "kl_div": kl_div}
 
-    def test_step(self, context_x, context_y, pred_x):
+    def _test_step_logic(self, context_x, context_y, pred_x):
         # At test time, we don't have target_y. The `call` method will
         # sample the latent z from the prior distribution p(z|context).
 
@@ -536,8 +542,6 @@ class CNP(ConditionalModelMixin, BaseNeuralProcess):
 
         self.encoder = MeanEncoder(self.encoder_sizes)
         self.decoder = Decoder(full_decoder_sizes)
-
-        self._compile_step_functions()
 
     def call(self, inputs, training=False):
         context_x, context_y, target_x = inputs
@@ -601,8 +605,6 @@ class NP(LatentModelMixin, BaseNeuralProcess):
         self.det_encoder = MeanEncoder(self.det_encoder_sizes)
         self.latent_encoder = LatentEncoder(self.latent_encoder_sizes, self.num_latents)
         self.decoder = Decoder(full_decoder_sizes)
-
-        self._compile_step_functions()
 
     def call(self, inputs, training=False):
         context_x, context_y, target_x, target_y = inputs
@@ -688,8 +690,6 @@ class ANP(LatentModelMixin, BaseNeuralProcess):
         self.att_encoder = AttentiveEncoder(self.att_encoder_sizes, self.num_heads)
         self.latent_encoder = LatentEncoder(self.latent_encoder_sizes, self.num_latents)
         self.decoder = Decoder(full_decoder_sizes)
-
-        self._compile_step_functions()
 
     def call(self, inputs, training=False):
         context_x, context_y, target_x, target_y = inputs
