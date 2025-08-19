@@ -679,9 +679,14 @@ def mnist_val_step(model, X_val, y_val, num_context_range, epoch, seed):
     # Reshape images from flat vectors to 2D arrays
     # Assuming batch size is 1 for validation plotting
     IMAGE_HEIGHT, IMAGE_WIDTH = 28, 28  # MNIST
-    gt_img = y_val[0].reshape(IMAGE_HEIGHT, IMAGE_WIDTH)
-    pred_img = pred_y_mean[0].reshape(IMAGE_HEIGHT, IMAGE_WIDTH)
-    std_img = pred_y_std[0].reshape(IMAGE_HEIGHT, IMAGE_WIDTH)
+
+    gt_img = ops.reshape(ops.convert_to_numpy(y_val)[0], (IMAGE_HEIGHT, IMAGE_WIDTH))
+    pred_img = ops.reshape(
+        ops.convert_to_numpy(pred_y_mean)[0], (IMAGE_HEIGHT, IMAGE_WIDTH)
+    )
+    std_img = ops.reshape(
+        ops.convert_to_numpy(pred_y_std)[0], (IMAGE_HEIGHT, IMAGE_WIDTH)
+    )
 
     # Plot 1: Ground Truth with Context Points
     plot_2dimage(
