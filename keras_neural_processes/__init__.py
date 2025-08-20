@@ -1,31 +1,39 @@
 from .src import (
-    ANP,
-    AttentiveEncoder,
-    CNP,
-    Decoder,
-    LatentEncoder,
+    # Aggregators
+    MeanAggregator,
+    AttentionAggregator,
+    # Compositional Encoders
+    DeterministicEncoder,
+    CompositionalLatentEncoder,
+    # Legacy Encoders (for backward compatibility)
     MeanEncoder,
+    LatentEncoder,
+    AttentiveEncoder,
+    Decoder,
+    # Models
+    CNP,
     NP,
+    ANP,
 )
-
+from . import utils
 
 __version__ = "0.0.2a0"
 
 __all__ = [
-    "get_context_set",
-    "get_train_batch",
-    "gplike_calculate_mymetrics",
-    "gplike_plot_functions",
-    "gplike_fixed_sets",
-    "gplike_new_sets",
-    "gplike_val_step",
-    "plot_2dimage",
-    "mnist_val_step",
+    # Aggregators
+    "MeanAggregator",
+    "AttentionAggregator",
+    # Compositional Encoders
+    "DeterministicEncoder",
+    "CompositionalLatentEncoder",
+    # Legacy Encoders
     "MeanEncoder",
     "LatentEncoder",
     "AttentiveEncoder",
     "Decoder",
+    # Models
     "CNP",
     "NP",
     "ANP",
+    "utils",
 ]

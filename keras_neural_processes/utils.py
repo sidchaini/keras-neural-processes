@@ -11,6 +11,83 @@ import tensorflow as tf
 import tensorflow_probability as tfp
 
 
+def neural_process_generator(
+    X_train,
+    y_train,
+    batch_size=64,
+    num_context_range=[2, 10],
+    num_context_mode="each",
+    shuffle_seed=None,
+    max_num_points=None,
+):
+    """
+    Generator function for Neural Process training that yields batches with
+    randomly sampled context/target sets for each step.
+
+    This generator runs indefinitely, yielding a new batch with fresh random
+    sampling of context points for every step, which is essential for proper
+    Neural Process training.
+
+    Args:
+        X_train: Training input data, shape (num_samples, num_points, x_dim)
+        y_train: Training output data, shape (num_samples, num_points, y_dim)
+        batch_size: Number of samples per batch
+        num_context_range: Range for sampling number of context points
+        num_context_mode: Mode for context sampling ("all" or "each")
+        shuffle_seed: Optional seed for reproducibility
+        max_num_points: Maximum number of points to pad to (defaults to X_train.shape[1])
+
+    Yields:
+        tuple: ((context_x, context_y, target_x), target_y) ready for model.fit()
+    """
+    if shuffle_seed is not None:
+        np.random.seed(shuffle_seed)
+
+    if max_num_points is None:
+        max_num_points = X_train.shape[1]
+
+    while True:
+        # Sample a batch from the training data
+        X_batch, y_batch = get_train_batch(X_train, y_train, batch_size)
+
+        # Sample number of context points for this batch
+        num_context = _sample_num_context(num_context_range)
+
+        # Get context set
+        context_x, context_y = get_context_set(
+            X_batch, y_batch, num_context, num_context_mode
+        )
+
+        # Target set is the full batch
+        target_x, target_y = X_batch, y_batch
+
+        # Ensure consistent shapes by using the original data dimensions
+        # This avoids Keras' variable input dimension issues
+        context_x = (
+            context_x[:, :max_num_points]
+            if context_x.shape[1] > max_num_points
+            else context_x
+        )
+        context_y = (
+            context_y[:, :max_num_points]
+            if context_y.shape[1] > max_num_points
+            else context_y
+        )
+        target_x = (
+            target_x[:, :max_num_points]
+            if target_x.shape[1] > max_num_points
+            else target_x
+        )
+        target_y = (
+            target_y[:, :max_num_points]
+            if target_y.shape[1] > max_num_points
+            else target_y
+        )
+
+        # Package for Keras fit: inputs=(context_x, context_y, target_x), targets=target_y
+        yield (context_x, context_y, target_x), target_y
+
+
 def get_context_set(
     target_x,
     target_y,
@@ -205,7 +282,11 @@ def get_train_batch(X_train, y_train, batch_size=64):
     """
     Sidnote: shape is (samples, points, channels) for x and y both
     """
-    assert X_train.shape[:-1] == y_train.shape[:-1]
+    if X_train.shape[:-1] != y_train.shape[:-1]:
+        raise ValueError(
+            "X_train and y_train must have the same number of samples and points, "
+            f"but got shapes {X_train.shape} and {y_train.shape}."
+        )
     tot_samples = X_train.shape[0]
     # choose batch_size points from tot_batches e.g. 64 from 10000 randomly
     batch_indices = np.random.choice(tot_samples, batch_size, replace=False)

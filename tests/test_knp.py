@@ -3,6 +3,7 @@ import pytest
 import tensorflow as tf
 import keras
 from keras import ops
+import tensorflow_probability as tfp
 
 import keras_neural_processes as knp
 
@@ -267,9 +268,9 @@ class TestTrainingMethods:
         target_x_prep = model._prepare_x(target_x)
         target_y_prep = model._prepare_y(target_y)
 
-        logs = model.train_step(
-            context_x_prep, context_y_prep, target_x_prep, target_y_prep
-        )
+        # Package data in the format expected by the new train_step
+        data = ((context_x_prep, context_y_prep, target_x_prep), target_y_prep)
+        logs = model.train_step(data)
 
         assert "loss" in logs
         assert not tf.math.is_nan(logs["loss"])
@@ -308,16 +309,15 @@ class TestErrorHandling:
             _ = model.predict(context_x, context_y, pred_x)
 
     def test_incompatible_shapes_train(self):
-        """Test error handling for incompatible shapes in train."""
-        model = knp.CNP()
-        optimizer = keras.optimizers.Adam()
-
+        """Test error handling for incompatible shapes with neural_process_generator."""
         # Mismatched samples
         x_train = np.random.randn(2, 10, 1).astype(np.float32)
         y_train = np.random.randn(3, 10, 1).astype(np.float32)
 
         with pytest.raises(ValueError, match="same number of samples and points"):
-            model.train(x_train, y_train, epochs=1, optimizer=optimizer)
+            # This should fail when the generator tries to create batches
+            gen = knp.utils.neural_process_generator(x_train, y_train, batch_size=1)
+            next(gen)  # Try to get the first batch
 
     def test_invalid_y_shape(self):
         """Test error for invalid y shape (not matching y_dims)."""
@@ -548,9 +548,10 @@ class TestDifferentDimensions:
             context_y_prep = model._prepare_y(context_y)
             target_x_prep = model._prepare_x(target_x)
             target_y_prep = model._prepare_y(target_y)
-            logs = model.train_step(
-                context_x_prep, context_y_prep, target_x_prep, target_y_prep
-            )
+
+            # Package data in the format expected by the new train_step
+            data = ((context_x_prep, context_y_prep, target_x_prep), target_y_prep)
+            logs = model.train_step(data)
             assert "loss" in logs
 
     def test_multi_input_cnp(self):
@@ -602,16 +603,14 @@ class TestIntegration:
         model = knp.CNP(encoder_sizes=[32, 32], decoder_sizes=[16, 16])
         optimizer = keras.optimizers.Adam(learning_rate=1e-3)
 
-        history = model.train(
-            x,
-            y,
-            epochs=3,
-            optimizer=optimizer,
-            batch_size=2,
-            pbar=False,
-            plotcb=False,
-            num_context_mode="all",  # Use 'all' for 1D x data
+        model.compile(optimizer=optimizer)
+
+        # Use the new generator-based approach
+        train_gen = knp.utils.neural_process_generator(
+            x, y, batch_size=2, num_context_range=[5, 10], num_context_mode="all"
         )
+
+        history = model.fit(train_gen, steps_per_epoch=3, epochs=3, verbose=0)
 
         # Check that losses are finite
         assert all(np.isfinite(loss) for loss in history.history["loss"])
@@ -668,9 +667,138 @@ class TestModelBehavior:
         target_y_prep = model._prepare_y(
             np.random.randn(*target_x.shape).astype(np.float32)
         )
-        model.train_step(context_x_prep, context_y_prep, target_x_prep, target_y_prep)
+        data = ((context_x_prep, context_y_prep, target_x_prep), target_y_prep)
+        model.train_step(data)
         assert call_args.get("training") is True
 
         # Test during predict
         model.predict(context_x, context_y, target_x)
         assert call_args.get("training") is False
+
+
+# Tests for passing custom networks
+class TestCustomNetworks:
+    def test_custom_network_mean_encoder(self, context_target_data):
+        """Test MeanEncoder with a custom network."""
+        context_x, context_y, _, _ = context_target_data
+        custom_net = keras.Sequential(
+            [
+                keras.layers.Dense(64, activation="relu"),
+                keras.layers.Dense(32),
+            ]
+        )
+        encoder = knp.MeanEncoder(network=custom_net)
+        representation = encoder(context_x, context_y)
+        expected_shape = (context_x.shape[0], 1, 32)
+        assert representation.shape == expected_shape
+
+    def test_custom_network_latent_encoder(self, context_target_data):
+        """Test LatentEncoder with a custom network."""
+        context_x, context_y, _, _ = context_target_data
+        custom_net = keras.Sequential(
+            [
+                keras.layers.Dense(64, activation="relu"),
+                keras.layers.Dense(64),
+            ]
+        )
+        encoder = knp.LatentEncoder(network=custom_net, num_latents=32)
+        distribution = encoder(context_x, context_y)
+        assert hasattr(distribution, "mean")
+        expected_shape = (context_x.shape[0], 32)
+        assert distribution.mean().shape == expected_shape
+
+    def test_custom_network_attentive_encoder(self, context_target_data):
+        """Test AttentiveEncoder with a custom network."""
+        context_x, context_y, target_x, _ = context_target_data
+        context_net = keras.Sequential(
+            [
+                keras.layers.Dense(64, activation="relu"),
+                keras.layers.Dense(32),
+            ]
+        )
+        query_net = keras.layers.Dense(32)
+        encoder = knp.AttentiveEncoder(
+            context_network=context_net, query_network=query_net, num_heads=4
+        )
+        representation = encoder(context_x, context_y, target_x)
+        expected_shape = (target_x.shape[0], target_x.shape[1], 32)
+        assert representation.shape == expected_shape
+
+    def test_custom_network_decoder(self, context_target_data):
+        """Test Decoder with a custom network."""
+        _, _, target_x, target_y = context_target_data
+        representation = np.random.randn(
+            target_x.shape[0], target_x.shape[1], 64
+        ).astype(np.float32)
+        custom_net = keras.Sequential(
+            [
+                keras.layers.Dense(32, activation="relu"),
+                keras.layers.Dense(2),
+            ]
+        )
+        decoder = knp.Decoder(network=custom_net)
+        mean, std = decoder(representation, target_x)
+        assert mean.shape == target_y.shape
+        assert std.shape == target_y.shape
+
+    def test_cnp_with_custom_components(self, context_target_data):
+        """Test CNP with custom encoder and decoder instances."""
+        context_x, context_y, target_x, target_y = context_target_data
+        encoder = knp.MeanEncoder(sizes=[64, 32])
+        decoder = knp.Decoder(sizes=[32, 2])
+        model = knp.CNP(encoder=encoder, decoder=decoder)
+        mean, std = model([context_x, context_y, target_x])
+        assert mean.shape == target_y.shape
+        assert std.shape == target_y.shape
+
+    def test_np_with_custom_components(self, context_target_data):
+        """Test NP with custom encoder and decoder instances."""
+        context_x, context_y, target_x, target_y = context_target_data
+        det_encoder = knp.MeanEncoder(sizes=[64, 32])
+        latent_encoder = knp.LatentEncoder(sizes=[64, 32], num_latents=16)
+        decoder = knp.Decoder(sizes=[32, 2])
+        model = knp.NP(
+            det_encoder=det_encoder, latent_encoder=latent_encoder, decoder=decoder
+        )
+        pred_dist, _, _ = model([context_x, context_y, target_x, target_y])
+        assert pred_dist.mean().shape == target_y.shape
+
+    def test_cnp_with_cnn_encoder(self, context_target_data):
+        """Test CNP with a custom CNN-based encoder."""
+        context_x, context_y, target_x, target_y = context_target_data
+
+        cnn_net = keras.Sequential(
+            [
+                keras.layers.Conv1D(filters=16, kernel_size=3, activation="relu"),
+                keras.layers.Flatten(),
+                keras.layers.Dense(32),
+            ]
+        )
+
+        encoder = knp.MeanEncoder(network=cnn_net, network_aggregates=True)
+        decoder = knp.Decoder(sizes=[32, 2])
+        model = knp.CNP(encoder=encoder, decoder=decoder)
+        mean, std = model([context_x, context_y, target_x])
+        assert mean.shape == target_y.shape
+        assert std.shape == target_y.shape
+
+    def test_np_with_rnn_encoder(self, context_target_data):
+        """Test NP with a custom RNN-based latent encoder."""
+        context_x, context_y, target_x, target_y = context_target_data
+
+        rnn_net = keras.Sequential(
+            [
+                keras.layers.LSTM(64),
+            ]
+        )
+
+        det_encoder = knp.MeanEncoder(sizes=[64, 32])
+        latent_encoder = knp.LatentEncoder(
+            network=rnn_net, num_latents=16, network_aggregates=True
+        )
+        decoder = knp.Decoder(sizes=[32, 2])
+        model = knp.NP(
+            det_encoder=det_encoder, latent_encoder=latent_encoder, decoder=decoder
+        )
+        pred_dist, _, _ = model([context_x, context_y, target_x, target_y])
+        assert pred_dist.mean().shape == target_y.shape
