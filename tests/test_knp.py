@@ -3,7 +3,6 @@ import pytest
 import tensorflow as tf
 import keras
 from keras import ops
-import tensorflow_probability as tfp
 
 import keras_neural_processes as knp
 
@@ -593,6 +592,7 @@ class TestDifferentDimensions:
         assert std.shape == (batch_size, num_targets, y_dim)
 
 
+# TOFO
 # Integration tests
 class TestIntegration:
 

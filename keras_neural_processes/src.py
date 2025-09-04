@@ -2,11 +2,8 @@ import warnings
 
 import keras
 from keras import layers, ops
-from keras.utils import Progbar
 import tensorflow as tf
 import tensorflow_probability as tfp
-
-from . import utils
 
 
 # =============================================================================
@@ -59,7 +56,8 @@ class AttentionAggregator(layers.Layer):
         self.cross_attention_norm = layers.LayerNormalization()
 
     def build(self, input_shape):
-        # input_shape should be [(batch, num_context, rep_dim), (batch, num_targets, x_dim)]
+        # input_shape should be
+        # [(batch, num_context, rep_dim), (batch, num_targets, x_dim)]
         context_shape, target_shape = input_shape
         rep_dim = context_shape[-1]
 
@@ -131,9 +129,11 @@ class DeterministicEncoder(layers.Layer):
     A compositional deterministic encoder that combines a processor and aggregator.
 
     Args:
-        processor: A Keras model/layer that processes (context_x, context_y) -> representations
+        processor: A Keras model/layer that processes
+            (context_x, context_y) -> representations
         aggregator: An aggregator layer (MeanAggregator or AttentionAggregator)
-        target_x_required: Whether the aggregator needs target_x (True for AttentionAggregator)
+        target_x_required: Whether the aggregator needs target_x
+            (True for AttentionAggregator)
     """
 
     def __init__(self, processor, aggregator, target_x_required=False, **kwargs):
@@ -314,7 +314,8 @@ class LatentEncoder(layers.Layer):
             self.mlp = keras.Sequential(mlp_layers, name="mlp")
         else:
             raise ValueError(
-                "Either ('sizes' and 'num_latents') or ('network' and 'num_latents') must be provided."
+                "Either ('sizes' and 'num_latents') or "
+                "('network' and 'num_latents') must be provided."
             )
 
         # Two final layers for mean and log_sigma
@@ -498,8 +499,9 @@ class Decoder(layers.Layer):
 
             if output_dim % 2 != 0:
                 warnings.warn(
-                    "Warning: The last layer size of the decoder should be an even number, "
-                    "as it's split into a mean and a standard deviation for each output "
+                    "Warning: The last layer size of the decoder should "
+                    "be an even number, as it's split into a mean and a "
+                    "standard deviation for each output "
                     f"dimension. Got size {output_dim}.",
                     UserWarning,
                 )
@@ -517,8 +519,9 @@ class Decoder(layers.Layer):
             output_dim = hidden.shape[-1]
             if output_dim % 2 != 0:
                 warnings.warn(
-                    "Warning: The custom network for the decoder should have an even number "
-                    "of outputs, as it's split into a mean and a standard deviation. "
+                    "Warning: The custom network for the decoder "
+                    "should have an even number of outputs, as it's "
+                    "split into a mean and a standard deviation. "
                     f"Got size {output_dim}.",
                     UserWarning,
                 )
@@ -776,7 +779,8 @@ class CNP(ConditionalModelMixin, BaseNeuralProcess):
         context_x, context_y, target_x = inputs
 
         # 1. Encode context to a single, global representation vector
-        # Check if using new compositional encoder or old encoder for backward compatibility
+        # Check if using new compositional encoder
+        # or old encoder for backward compatibility
         if isinstance(self.encoder, DeterministicEncoder):
             representation = self.encoder([context_x, context_y])
         else:
@@ -871,7 +875,8 @@ class NP(LatentModelMixin, BaseNeuralProcess):
         context_x, context_y, target_x, target_y = inputs
 
         # Latent Path: determine prior and posterior distributions for z
-        # Check if using new compositional encoder or old encoder for backward compatibility
+        # Check if using new compositional encoder
+        # or old encoder for backward compatibility
         if isinstance(self.latent_encoder, CompositionalLatentEncoder):
             prior_dist = self.latent_encoder([context_x, context_y])
             if training:
@@ -897,7 +902,8 @@ class NP(LatentModelMixin, BaseNeuralProcess):
         )
 
         # Deterministic Path (using mean encoder)
-        # Check if using new compositional encoder or old encoder for backward compatibility
+        # Check if using new compositional encoder
+        # or old encoder for backward compatibility
         if isinstance(self.det_encoder, DeterministicEncoder):
             det_rep = self.det_encoder([context_x, context_y])
         else:
@@ -1001,7 +1007,8 @@ class ANP(LatentModelMixin, BaseNeuralProcess):
         context_x, context_y, target_x, target_y = inputs
 
         # Latent Path (same as NP, provides global context)
-        # Check if using new compositional encoder or old encoder for backward compatibility
+        # Check if using new compositional encoder
+        # or old encoder for backward compatibility
         if isinstance(self.latent_encoder, CompositionalLatentEncoder):
             prior_dist = self.latent_encoder([context_x, context_y])
             if training:
@@ -1029,7 +1036,8 @@ class ANP(LatentModelMixin, BaseNeuralProcess):
         # Deterministic Path (uses attention to get target-specific context)
         # Note: The output `det_rep` already has shape (batch, num_targets, features),
         # so it does NOT need to be broadcasted like in CNP/NP.
-        # Check if using new compositional encoder or old encoder for backward compatibility
+        # Check if using new compositional encoder
+        # or old encoder for backward compatibility
         if isinstance(self.att_encoder, DeterministicEncoder):
             det_rep = self.att_encoder([context_x, context_y, target_x])
         else:

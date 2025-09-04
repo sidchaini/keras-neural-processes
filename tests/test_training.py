@@ -2,7 +2,6 @@ import numpy as np
 import pytest
 import keras
 import keras_neural_processes as knp
-from unittest.mock import MagicMock
 
 
 def train_model_new_api(
