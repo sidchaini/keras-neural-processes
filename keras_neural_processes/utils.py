@@ -278,18 +278,37 @@ def _get_context_set_np(
     return context_x, context_y
 
 
-def get_train_batch(X_train, y_train, batch_size=64):
-    """
+def get_train_batch(X_train, y_train, stratify_labels=False, batch_size=64):
+    '''
     Sidnote: shape is (samples, points, channels) for x and y both
-    """
-    if X_train.shape[:-1] != y_train.shape[:-1]:
-        raise ValueError(
-            "X_train and y_train must have the same number of samples and points, "
-            f"but got shapes {X_train.shape} and {y_train.shape}."
-        )
+    E.g. of stratify = (labels in order)
+    '''
+    assert X_train.shape[:-1] == y_train.shape[:-1]
     tot_samples = X_train.shape[0]
-    # choose batch_size points from tot_batches e.g. 64 from 10000 randomly
-    batch_indices = np.random.choice(tot_samples, batch_size, replace=False)
+
+    if stratify_labels is not False:
+        assert len(stratify_labels) == tot_samples
+
+        stratify_labels = pd.Series(stratify_labels)
+        n_classes = stratify_labels.nunique()
+        samples_per_class = batch_size // n_classes
+        remainder = batch_size % n_classes
+
+        groupby_obj = stratify_labels.groupby(stratify_labels,sort=False)
+        
+        # batch_indices = groupby_obj.sample(
+        #     n=samples_per_class, replace=False,
+        # ).index
+
+        batch_indices = []
+        for i, (name, group) in enumerate(groupby_obj):
+            n_to_sample = samples_per_class + 1 if i < remainder else samples_per_class
+            # replace = len(group) < n_to_sample
+            batch_indices.extend(group.sample(n=n_to_sample, replace=False).index.tolist())
+        
+    else:
+        # choose batch_size points from tot_batches e.g. 64 from 10000 randomly
+        batch_indices = np.random.choice(tot_samples, batch_size, replace=False)
 
     if isinstance(X_train, np.ndarray):
         X_train_batch = X_train[batch_indices, :, :]
