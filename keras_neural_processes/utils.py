@@ -19,6 +19,7 @@ def neural_process_generator(
     num_context_mode="each",
     shuffle_seed=None,
     max_num_points=None,
+    stratify_labels=False,
 ):
     """
     Generator function for Neural Process training that yields batches with
@@ -48,7 +49,9 @@ def neural_process_generator(
 
     while True:
         # Sample a batch from the training data
-        X_batch, y_batch = get_train_batch(X_train, y_train, batch_size)
+        X_batch, y_batch = get_train_batch(
+            X_train, y_train, stratify_labels=stratify_labels, batch_size=batch_size
+        )
 
         # Sample number of context points for this batch
         num_context = _sample_num_context(num_context_range)
@@ -279,10 +282,10 @@ def _get_context_set_np(
 
 
 def get_train_batch(X_train, y_train, stratify_labels=False, batch_size=64):
-    '''
+    """
     Sidnote: shape is (samples, points, channels) for x and y both
     E.g. of stratify = (labels in order)
-    '''
+    """
     assert X_train.shape[:-1] == y_train.shape[:-1]
     tot_samples = X_train.shape[0]
 
@@ -294,8 +297,8 @@ def get_train_batch(X_train, y_train, stratify_labels=False, batch_size=64):
         samples_per_class = batch_size // n_classes
         remainder = batch_size % n_classes
 
-        groupby_obj = stratify_labels.groupby(stratify_labels,sort=False)
-        
+        groupby_obj = stratify_labels.groupby(stratify_labels, sort=False)
+
         # batch_indices = groupby_obj.sample(
         #     n=samples_per_class, replace=False,
         # ).index
@@ -304,8 +307,10 @@ def get_train_batch(X_train, y_train, stratify_labels=False, batch_size=64):
         for i, (name, group) in enumerate(groupby_obj):
             n_to_sample = samples_per_class + 1 if i < remainder else samples_per_class
             # replace = len(group) < n_to_sample
-            batch_indices.extend(group.sample(n=n_to_sample, replace=False).index.tolist())
-        
+            batch_indices.extend(
+                group.sample(n=n_to_sample, replace=False).index.tolist()
+            )
+
     else:
         # choose batch_size points from tot_batches e.g. 64 from 10000 randomly
         batch_indices = np.random.choice(tot_samples, batch_size, replace=False)
