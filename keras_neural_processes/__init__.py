@@ -9,7 +9,7 @@ from .src import (
 )
 
 
-__version__ = "0.0.2a0"
+__version__ = "0.0.3a0"
 
 __all__ = [
     "get_context_set",
@@ -21,10 +21,10 @@ __all__ = [
     "gplike_val_step",
     "plot_2dimage",
     "mnist_val_step",
-    "MeanEncoder",
+    "DeterministicEncoder",
     "LatentEncoder",
     "AttentiveEncoder",
-    "Decoder",
+    "DeterministicDecoder",
     "CNP",
     "NP",
     "ANP",

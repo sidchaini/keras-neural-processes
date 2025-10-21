@@ -8,58 +8,158 @@ import tensorflow_probability as tfp
 
 from . import utils
 
+# =============================================================================
+# 0. HELPER FUNCTION
+# =============================================================================
+
+def create_np_dataset(
+    X,
+    y,
+    labels,
+    batch_size,
+    num_context_range,
+    num_context_mode,
+    # Pass the sampling functions as arguments
+    _sample_num_context_fn,
+    _get_context_set_fn,
+):
+    """
+    Creates a high-performance tf.data.Dataset for training Neural Processes.
+
+    This pipeline handles shuffling, batching, and context/target sampling
+    efficiently on the fly.
+    """
+
+    def _sample_py_function(target_x_batch, target_y_batch):
+        num_context = _sample_num_context_fn(num_context_range)
+        context_x, context_y = _get_context_set_fn(
+            target_x_batch.numpy(),
+            target_y_batch.numpy(),
+            num_context,
+            num_context_mode,
+        )
+        return context_x, context_y
+
+    # Define the output signature for the py_function
+    context_x_spec = tf.TensorSpec(shape=[None, None, X.shape[-1]], dtype=tf.float32)
+    context_y_spec = tf.TensorSpec(shape=[None, None, y.shape[-1]], dtype=tf.float32)
+
+    def _map_fn(target_x, target_y, label):
+        context_x, context_y = tf.py_function(
+            func=_sample_py_function,
+            inp=[target_x, target_y],
+            Tout=[context_x_spec, context_y_spec],
+        )
+        context_x.set_shape([batch_size, None, X.shape[-1]])
+        context_y.set_shape([batch_size, None, y.shape[-1]])
+        return context_x, context_y, target_x, target_y
+
+    # 1. Create dataset from tensor slices
+    dataset = tf.data.Dataset.from_tensor_slices((X, y, labels))
+
+    # 2. Shuffle the dataset. Buffer size = dataset size for perfect shuffling.
+    dataset = dataset.shuffle(buffer_size=len(X))
+
+    # 3. Batch the data. drop_remainder=True is important for static shapes,
+    #    which helps JIT compilation.
+    dataset = dataset.batch(batch_size, drop_remainder=True)
+
+    # 4. Map the sampling function across batches.
+    #    num_parallel_calls=tf.data.AUTOTUNE lets TF parallelize this step.
+    dataset = dataset.map(_map_fn, num_parallel_calls=tf.data.AUTOTUNE)
+
+    # 5. Repeat indefinitely
+    dataset = dataset.repeat()
+
+
+    # 6. Prefetch to overlap data preprocessing with model execution.
+    #    This is the key to keeping the GPU fed with data.
+    dataset = dataset.prefetch(buffer_size=tf.data.AUTOTUNE)
+
+    return dataset
+
+
 
 # =============================================================================
 # 1. COMPONENT LAYERS (THE BUILDING BLOCKS)
 # =============================================================================
 @keras.saving.register_keras_serializable()
-class MeanEncoder(layers.Layer):
-    def __init__(self, sizes, **kwargs):
+class DeterministicEncoder(layers.Layer):
+    def __init__(self, hidden_sizes=[128, 128, 128, 128], **kwargs):
         super().__init__(**kwargs)
-        self.sizes = list(sizes)
-        self.activation = kwargs.get("activation", "relu")
-        self.mlp_layers = []
-
-        for size in self.sizes[:-1]:
-            self.mlp_layers.append(layers.Dense(size, activation=self.activation))
+        self.hidden_sizes = hidden_sizes
+        self.hidden_layers = []
+        for size in hidden_sizes[:-1]:
+            self.hidden_layers.append(layers.Dense(size, activation="relu"))
         # Final layer without activation
-        self.mlp_layers.append(layers.Dense(sizes[-1]))
+        self.hidden_layers.append(layers.Dense(hidden_sizes[-1]))
+
+    def build(self, input_shape):
+        context_x_shape, context_y_shape = input_shape
+        
+        # The input to the first Dense layer is the concatenation of x and y features
+        current_shape_dim = context_x_shape[-1] + context_y_shape[-1]
+        # Build each layer sequentially
+        for layer in self.hidden_layers:
+            layer.build(input_shape=(None, None, current_shape_dim))
+            current_shape_dim = layer.units # The output dim of this layer is the input dim for the next
+
+        # Mark this layer as built
+        super().build(input_shape)
 
     def call(self, context_x, context_y):
-        # Concatenate x and y to create input features for each context point
+        # Concatenate x and y along feature dimension
         encoder_input = ops.concatenate([context_x, context_y], axis=-1)
 
-        # Pass through the MLP
+        # Pass through MLP
         hidden = encoder_input
-        for layer in self.mlp_layers:
+        for layer in self.hidden_layers:
             hidden = layer(hidden)
 
-        # Aggregate representations by taking the mean across the context points
-        # Shape: (batch, num_context, features) -> (batch, 1, features)
+        # Average over context points
         representation = ops.mean(hidden, axis=1, keepdims=True)
         return representation
 
     def get_config(self):
         config = super().get_config()
-        config.update({"sizes": self.sizes})
-        config.update({"activation": self.activation})
+        config.update({"hidden_sizes": self.hidden_sizes})
         return config
 
 
 @keras.saving.register_keras_serializable()
 class LatentEncoder(layers.Layer):
-    def __init__(self, sizes, num_latents, **kwargs):
+    def __init__(self, hidden_sizes=[128, 128], num_latents=128, **kwargs):
         super().__init__(**kwargs)
-        self.sizes = list(sizes)
+        self.hidden_sizes = hidden_sizes
         self.num_latents = num_latents
-        self.activation = kwargs.get("activation", "relu")
-        self.mlp_layers = []
+        
+        self.hidden_layers = []
+        for size in hidden_sizes:
+            self.hidden_layers.append(layers.Dense(size, activation="relu"))
 
-        for size in sizes:
-            self.mlp_layers.append(layers.Dense(size, activation=self.activation))
+        ## NEW
+        penultimate_units = (self.hidden_sizes[-1] + self.num_latents) // 2
+        self.penultimate_layer = layers.Dense(penultimate_units, activation=None, name="penultimate_layer")
+
+        
         # Two final layers for mean and log_sigma
         self.mu_layer = layers.Dense(self.num_latents)
         self.log_sigma_layer = layers.Dense(self.num_latents)
+
+    def build(self, input_shape):
+        context_x_shape, context_y_shape = input_shape
+        current_shape_dim = context_x_shape[-1] + context_y_shape[-1]
+        
+        for layer in self.hidden_layers:
+            layer.build(input_shape=(None, None, current_shape_dim))
+            current_shape_dim = layer.units
+            
+        # The penultimate layer's output is the input to mu and log_sigma layers
+        penultimate_shape = (None, None, current_shape_dim)
+        self.mu_layer.build(penultimate_shape)
+        self.log_sigma_layer.build(penultimate_shape)
+
+        super().build(input_shape)
 
     def call(self, x, y):
         # Concatenate x and y along feature dimension
@@ -67,283 +167,259 @@ class LatentEncoder(layers.Layer):
 
         # Pass through MLP
         hidden = encoder_input
-        for layer in self.mlp_layers:
+        for layer in self.hidden_layers:
             hidden = layer(hidden)
-
+        
         # Aggregate by taking the mean over all points
         hidden = ops.mean(hidden, axis=1)
 
+        ## NEW
+        hidden = self.penultimate_layer(hidden)
+        
         # Get mean and log_sigma for the latent distribution
         mu = self.mu_layer(hidden)
         log_sigma = self.log_sigma_layer(hidden)
-
+        
         # Bound the variance
-        sigma = 0.1 + 0.9 * ops.sigmoid(log_sigma)
+        min_latent_std = 1e-3
+        sigma = ops.maximum(min_latent_std, ops.softplus(log_sigma))
 
         # Return a distribution object
         return tfp.distributions.Normal(loc=mu, scale=sigma)
-
+        
     def get_config(self):
         config = super().get_config()
-        config.update(
-            {
-                "sizes": self.sizes,
-                "num_latents": self.num_latents,
-                "activation": self.activation,
-            }
-        )
+        config.update({
+            "hidden_sizes": self.hidden_sizes,
+            "num_latents": self.num_latents,
+        })
         return config
 
 
 @keras.saving.register_keras_serializable()
 class AttentiveEncoder(layers.Layer):
-    def __init__(self, encoder_sizes, num_heads, **kwargs):
+    def __init__(self, encoder_sizes=[128, 128, 128, 128], num_heads=8, **kwargs):
         super().__init__(**kwargs)
-        self.encoder_sizes = list(encoder_sizes)
+        self.encoder_sizes = encoder_sizes
         self.num_heads = num_heads
-        self.rep_dim = self.encoder_sizes[-1]  # The unified representation dimension
-        self.activation = kwargs.get("activation", "relu")
+        self.rep_dim = self.encoder_sizes[-1] # The unified representation dimension
+        
 
-        # 1. MLP to process each (context_x, context_y) pair into a representation
+        # --- Sub-layers ---
+        # 1. MLP to process each context point (x, y) individually
         self.context_mlp_hidden_layers = []
         for size in self.encoder_sizes[:-1]:
-            self.context_mlp_hidden_layers.append(
-                layers.Dense(size, activation=self.activation)
-            )
-        # Final layer without activation
+            self.context_mlp_hidden_layers.append(layers.Dense(size, activation="relu"))
         self.context_mlp_final_layer = layers.Dense(self.rep_dim)
 
-        # 2. Self-Attention over context points to model interactions
+        head_dim = max(1, self.rep_dim // self.num_heads)
+
+        # 2. Self-Attention over context points
         self.self_attention = layers.MultiHeadAttention(
-            num_heads=self.num_heads, key_dim=self.rep_dim
+            num_heads=self.num_heads, key_dim=head_dim, value_dim=head_dim
         )
         self.self_attention_norm = layers.LayerNormalization()
 
-        # 3. MLP to project target_x into a query vector for cross-attention
+        # 3. MLP to project target_x to be the cross-attention query
         self.query_mlp = layers.Dense(self.rep_dim)
 
-        # 4. Cross-Attention between target_x (query) and context (key/value)
+        # 4. Cross-Attention between target_x and context
         self.cross_attention = layers.MultiHeadAttention(
-            num_heads=self.num_heads, key_dim=self.rep_dim
+            num_heads=self.num_heads, key_dim=head_dim, value_dim=head_dim
         )
         self.cross_attention_norm = layers.LayerNormalization()
 
+    def build(self, input_shape):
+        context_x_shape, context_y_shape, target_x_shape = input_shape
+        
+        current_shape_dim = context_x_shape[-1] + context_y_shape[-1]
+        for layer in self.context_mlp_hidden_layers:
+            layer.build(input_shape=(None, None, current_shape_dim))
+            current_shape_dim = layer.units
+        self.context_mlp_final_layer.build(input_shape=(None, None, current_shape_dim))
+
+        attention_input_shape = (None, None, self.rep_dim)
+        self.self_attention.build(query_shape=attention_input_shape, value_shape=attention_input_shape)
+        self.self_attention_norm.build(attention_input_shape)
+        
+        self.query_mlp.build(target_x_shape)
+        
+        query_shape = (None, None, self.rep_dim)
+        self.cross_attention.build(query_shape=query_shape, value_shape=attention_input_shape)
+        self.cross_attention_norm.build(query_shape)
+
+        super().build(input_shape)
+
     def call(self, context_x, context_y, target_x):
-        # Process context points individually
         encoder_input = ops.concatenate([context_x, context_y], axis=-1)
         hidden = encoder_input
         for layer in self.context_mlp_hidden_layers:
             hidden = layer(hidden)
         context_representation = self.context_mlp_final_layer(hidden)
 
-        # Apply self-attention to the context representations
         self_att_output = self.self_attention(
             query=context_representation,
             value=context_representation,
-            key=context_representation,
+            key=context_representation
         )
-        context_representation = self.self_attention_norm(
-            context_representation + self_att_output
-        )
-
-        # Project target_x to create the query for cross-attention
+        context_representation = self.self_attention_norm(context_representation + self_att_output)
+        
         query = self.query_mlp(target_x)
 
-        # Apply cross-attention
         cross_att_output = self.cross_attention(
-            query=query, value=context_representation, key=context_representation
+            query=query,
+            value=context_representation,
+            key=context_representation
         )
-
-        # The final representation is target-specific.
-        # Shape: (batch, num_targets, features)
         final_representation = self.cross_attention_norm(query + cross_att_output)
-
+        
         return final_representation
 
     def get_config(self):
         config = super().get_config()
-        config.update(
-            {
-                "encoder_sizes": self.encoder_sizes,
-                "num_heads": self.num_heads,
-                "activation": self.activation,
-            }
-        )
+        config.update({
+            "encoder_sizes": self.encoder_sizes,
+            "num_heads": self.num_heads,
+        })
         return config
 
 
 @keras.saving.register_keras_serializable()
-class Decoder(layers.Layer):
-    def __init__(self, sizes, **kwargs):
-        super().__init__(**kwargs)
-        self.sizes = list(sizes)
-        self.activation = kwargs.get("activation", "relu")
-        self.mlp_layers = []
-
-        for size in self.sizes[:-1]:
-            self.mlp_layers.append(layers.Dense(size, activation=self.activation))
-
+class DeterministicDecoder(layers.Layer):
+    def __init__(self, hidden_sizes=[128, 128, 2], **kwargs):
+        super().__init__()
+        self.hidden_sizes = hidden_sizes
+        
+        self.hidden_layers = []
+        for size in hidden_sizes[:-1]:
+            self.hidden_layers.append(layers.Dense(size, activation="relu"))
         # Final layer outputs mean and log_std
-        if self.sizes[-1] % 2 != 0:
-            warnings.warn(
-                "Warning: The last layer size of the decoder should be an even number, "
-                "as it's split into a mean and a standard deviation for each output "
-                f"dimension. Got size {self.sizes[-1]}.",
-                UserWarning,
-            )
+        self.hidden_layers.append(layers.Dense(hidden_sizes[-1]))
 
-        self.mlp_layers.append(layers.Dense(self.sizes[-1]))
+    def build(self, input_shape):
+        representation_shape, target_x_shape = input_shape
+        
+        # The input to the first Dense layer is the concatenation of representation and target_x
+        current_shape_dim = representation_shape[-1] + target_x_shape[-1]
+        # Build each layer sequentially
+        for layer in self.hidden_layers:
+            layer.build(input_shape=(None, None, current_shape_dim))
+            current_shape_dim = layer.units # The output dim of this layer is the input dim for the next
+        
+        # Mark this layer as built
+        super().build(input_shape)
 
     def call(self, representation, target_x):
+        # Expand representation to match target batch size
+        # num_targets = ops.shape(target_x)[1]
+        # representation = ops.repeat(representation, num_targets, axis=1)
+
         # Concatenate representation and target_x
         decoder_input = ops.concatenate([representation, target_x], axis=-1)
 
         # Pass through MLP
         hidden = decoder_input
-        for layer in self.mlp_layers:
+        for layer in self.hidden_layers:
             hidden = layer(hidden)
 
         # Split into mean and log_std
         mean, log_std = ops.split(hidden, 2, axis=-1)
 
         # Bound the variance
-        std = 0.1 + 0.9 * ops.softplus(log_std)
+        min_obs_std = 1e-3
+        std = ops.maximum(min_obs_std, ops.softplus(log_std))
 
         return mean, std
 
     def get_config(self):
         config = super().get_config()
-        config.update({"sizes": self.sizes, "activation": self.activation})
+        config.update({"hidden_sizes": self.hidden_sizes})
         return config
 
 
 # =============================================================================
-# 2. BASE AND MIXIN CLASSES (THE SKELETONS)
+# 1. FLAVOURED NP MODELS
 # =============================================================================
 
-
 @keras.saving.register_keras_serializable()
-class BaseNeuralProcess(keras.Model):
-    """
-    An abstract base class for all Neural Process models.
-    It handles the high-level training loop, progress bars, and validation callbacks.
-
-    Subclasses must implement:
-    - `__init__(self, ...)`: To define their specific encoders and decoders.
-    - `call(self, inputs, training=False)`: To define the forward pass.
-    - `train_step(self, ...)`: To define the logic for a single gradient update.
-    - `test_step(self, ...)`: To define the inference logic.
-    """
-
-    def __init__(self, **kwargs):
+class CNP(keras.Model):
+    def __init__(self,
+                 encoder_sizes=[128, 128, 128, 128],
+                 decoder_sizes=[128, 128],
+                 output_dims=1,
+                 **kwargs
+                ):
         super().__init__(**kwargs)
-        # Placeholders for the dynamically compiled functions
-        self._x_spec = None
-        self._y_spec = None
-        self._compiled_train_step = None
-        self._compiled_test_step = None
 
-    def _initialize_specs(self, x, y):
-        """Create TensorSpecs for x and y if they don't exist."""
-        if self._x_spec is None:
-            self._x_spec = tf.TensorSpec(shape=[None, None, x.shape[2]], dtype=x.dtype)
-        if self._y_spec is None:
-            self._y_spec = tf.TensorSpec(shape=[None, None, y.shape[2]], dtype=y.dtype)
+        # Set encoder and decoder sizes
+        self.encoder_sizes = encoder_sizes
+        self.decoder_sizes_hidden = list(decoder_sizes) # Create a mutable
+        self.output_dims = output_dims
 
+        full_decoder_sizes = self.decoder_sizes_hidden + [2 * self.output_dims]
+        self.encoder = DeterministicEncoder(self.encoder_sizes)
+        self.decoder = DeterministicDecoder(full_decoder_sizes)
+
+    def build(self, input_shape):
+        context_x_shape, context_y_shape, target_x_shape = input_shape
+
+        # 1. Build the encoder with its specific input shapes.
+        #    The encoder's call method expects a tuple of (context_x, context_y).
+        self.encoder.build((context_x_shape, context_y_shape))
+
+        # 2. Determine the shape of the representation vector produced by the encoder
+        #    to build the decoder. The shape is (batch, 1, last_encoder_size).
+        representation_shape = (context_x_shape[0], 1, self.encoder_sizes[-1])
+
+        # 3. Build the decoder with its specific input shapes.
+        #    The decoder's call method expects (representation, target_x).
+        self.decoder.build((representation_shape, target_x_shape))
+
+        # 4. Run original validation logic from your build method
+        xdims = context_x_shape[-1]  # No. of channels / dims in x
+        ydims = context_y_shape[-1]  # No. of channels / dims in y
+        if xdims > 1:
+            warnings.warn(
+                "Note: The encoder implementation doesn't implicitly "
+                "depend on xdims. Ensure you use an encoder size that is "
+                "appropriate for your data.",
+                UserWarning,
+            )
+        assert ydims == self.output_dims
+
+        # 5. Call the parent's build method at the end.
+        super().build(input_shape)
+
+
+    def call(self, inputs, training=False):
+        context_x, context_y, target_x = inputs
+        representation = self.encoder(context_x, context_y) # Get representation from encoder
+        num_targets = ops.shape(target_x)[1]
+        
+        representation = ops.broadcast_to(
+            representation,
+            (ops.shape(representation)[0], num_targets, ops.shape(representation)[-1]),
+        )  # Shape: (batch, num_targets, dim)
+
+        
+        mean, std = self.decoder(representation, target_x) # Get predictions from decoder
+        return mean, std
+
+    @tf.function(jit_compile=True)
     def train_step(self, context_x, context_y, target_x, target_y):
-        """
-        Public-facing train_step wrapper.
-        Compiles the graph on the first call and reuses it for subsequent calls.
-        """
+        with tf.GradientTape() as tape:
+            mean, std = self((context_x, context_y, target_x), training=True) # Forward pass
+            dist = tfp.distributions.MultivariateNormalDiag(mean, std)
+            loss_value = -ops.mean(dist.log_prob(target_y)) # negative log likelihood loss
+        grads = tape.gradient(loss_value, self.trainable_weights)
+        self.optimizer.apply(grads, self.trainable_weights)
+        return loss_value
 
-        if self._compiled_train_step is None:
-            self._initialize_specs(context_x, context_y)
-            train_signature = [self._x_spec, self._y_spec, self._x_spec, self._y_spec]
-
-            # Compile the internal logic method provided by the Mixin class.
-            self._compiled_train_step = tf.function(
-                self._train_step_logic,
-                input_signature=train_signature,
-                jit_compile=True,
-            )
-
-        # Call the compiled function for this and all future steps.
-        return self._compiled_train_step(context_x, context_y, target_x, target_y)
-
+    @tf.function(jit_compile=True)
     def test_step(self, context_x, context_y, pred_x):
-        """
-        Public-facing test_step wrapper.
-        Compiles the graph on the first call and reuses it.
-        """
-        if self._compiled_test_step is None:
-            self._initialize_specs(context_x, context_y)
-            test_signature = [self._x_spec, self._y_spec, self._x_spec]
-
-            # Compile the internal logic method provided by the Mixin class.
-            self._compiled_test_step = tf.function(
-                self._test_step_logic, input_signature=test_signature, jit_compile=True
-            )
-
-        return self._compiled_test_step(context_x, context_y, pred_x)
-
-    def _prepare_x(self, X, name="X"):
-        """
-        Validate and prepare an X tensor.
-        Handles optional 1D to 2D conversion.
-        """
-        X = ops.convert_to_tensor(X, dtype="float32")
-        if len(X.shape) != 3:
-            raise ValueError(
-                f"{name} must be a 3D tensor, but got {len(X.shape)} dims."
-            )
-        return X
-
-    def _prepare_y(self, y, name="y"):
-        """Validate and prepare a y tensor."""
-        y = ops.convert_to_tensor(y, dtype="float32")
-        if len(y.shape) != 3 or y.shape[-1] != self.y_dims:
-            raise ValueError(
-                f"{name} must have shape (num_samples, num_points, {self.y_dims}), "
-                f"but got {y.shape}."
-            )
-        return y
-
-    def _validate_data_shapes(self, X, y, name="train"):
-        """Helper to validate the shape of the input data."""
-        X = self._prepare_x(X, name=f"X_{name}")
-        y = self._prepare_y(y, name=f"y_{name}")
-
-        if not ops.all(ops.shape(X)[:2] == ops.shape(y)[:2]):
-            raise ValueError(
-                f"X_{name} and y_{name} must have the same number of samples and points, "
-                f"but got {ops.shape(X)[:2]} and {ops.shape(y)[:2]}."
-            )
-        return X, y
-
-    def predict(self, context_x, context_y, pred_x):
-        """
-        Make predictions with the Neural Process.
-
-        Args:
-            context_x: Context points, x-values.
-            context_y: Context points, y-values.
-            pred_x: Target points for prediction, x-values.
-
-        Returns:
-            A tuple of (mean, std) for the predictions.
-        """
-        context_x = self._prepare_x(context_x, name="context_x")
-        context_y = self._prepare_y(context_y, name="context_y")
-        pred_x = self._prepare_x(pred_x, name="pred_x")
-
-        if not ops.all(ops.shape(context_x)[:2] == ops.shape(context_y)[:2]):
-            raise ValueError(
-                "context_x and context_y must have the same number of samples "
-                f"and points, but got shapes {ops.shape(context_x)} "
-                f"and {ops.shape(context_y)}."
-            )
-
-        return self.test_step(context_x, context_y, pred_x)
+        # Get model predictions and uncertainty estimates
+        pred_y_mean, pred_y_std = self((context_x, context_y, pred_x))
+        return pred_y_mean, pred_y_std
 
     def train(
         self,
@@ -359,364 +435,525 @@ class BaseNeuralProcess(keras.Model):
         y_val=None,
         plotcb=True,
         pbar=True,
-        plot_every=1000,
         pred_points=None,
-        seed_val=None,
-    ):
-        X_train, y_train = self._validate_data_shapes(X_train, y_train, name="train")
-        if X_val is not None and y_val is not None:
-            X_val, y_val = self._validate_data_shapes(X_val, y_val, name="val")
-
+        plot_every=1000,
+        stratify_labels=False,
+    ):        
         self.optimizer = optimizer
 
         if pbar:
-            metric_names = ["loss"]
-            if isinstance(self, LatentModelMixin):
-                metric_names.extend(["recon_loss", "kl_div"])
-            progbar = Progbar(epochs, stateful_metrics=metric_names)
+            progbar = Progbar(epochs, stateful_metrics=['loss'])
 
+        #
+        #        if X_val is None:
+        #            assert pred_points is not None
+        #        elif pred_points is None:
+        #            pred_points = X_val.shape[1]
+        #
+        #        if plotcb:
+        #            assert X_val is not None and y_val is not None
+        #
         if plotcb:
-            assert (
-                X_val is not None and y_val is not None
-            ), "Validation data must be provided if plotcb is True."
+            assert X_val is not None and y_val is not None, \
+                "Validation data must be provided if plotcb is True."
             if pred_points is None and dataset_type == "gp":
                 pred_points = X_val.shape[1]
 
+        # Initialize callbacks
         history = keras.callbacks.History()
         callbacks = keras.callbacks.CallbackList([history], model=self)
         callbacks.on_train_begin()
 
+        # no batching yet - possibly implement later
         for epoch in range(1, epochs + 1):
-            callbacks.on_epoch_begin(epoch)
+            # Reset metrics at start of each epoch
+            callbacks.on_epoch_begin(epoch)  # Called at start of epoch
 
-            # --- Data Sampling for this Epoch ---
-            X_train_batch, y_train_batch = utils.get_train_batch(
-                X_train, y_train, batch_size
-            )
-            num_context = utils._sample_num_context(num_context_range)
-            context_x_train, context_y_train = utils.get_context_set(
-                X_train_batch, y_train_batch, num_context, num_context_mode
-            )
-            target_x_train, target_y_train = X_train_batch, y_train_batch
+            context_x_train, context_y_train, target_x_train, target_y_train = next(train_iterator)
 
-            # --- Perform a single training step ---
-            # This will call the specific train_step wrapper
-            logs = self.train_step(
+            loss = self.train_step(
                 context_x_train, context_y_train, target_x_train, target_y_train
             )
 
-            callbacks.on_epoch_end(epoch, logs)
-            if pbar:
-                progbar.update(epoch, values=[(k, float(v)) for k, v in logs.items()])
+            # Update metrics with both loss and mae if reqd.
+            logs = {
+                "loss": float(loss),
+            }
+            callbacks.on_epoch_end(epoch, logs)  # Called at end of epoch
 
-            # --- Validation and Plotting Callback ---
+            if pbar:
+                progbar.update(epoch, values=[("loss", float(loss))])
+
             if plotcb and (epoch % plot_every == 0):
                 if dataset_type == "gp":
                     utils.gplike_val_step(
-                        self,
-                        X_val,
-                        y_val,
-                        pred_points,
-                        num_context_range,
-                        num_context_mode,
-                        epoch,
+                        model=self,
+                        X_val=X_val,
+                        y_val=y_val,
+                        pred_points=pred_points,
+                        num_context_range=num_context_range,
+                        num_context_mode=num_context_mode,
+                        epoch=epoch,
                         seed=seed_val,
                     )
-                elif dataset_type == "mnist":
+                elif dataset_type == 'mnist':
                     utils.mnist_val_step(
-                        self, X_val, y_val, num_context_range, epoch, seed=seed_val
+                        model=self,
+                        X_val=X_val,
+                        y_val=y_val,
+                        num_context_range=num_context_range,
+                        epoch=epoch,
+                        seed=seed_val,
                     )
+        callbacks.on_train_end()
         return history
 
-
-class ConditionalModelMixin:
-    """
-    Mixin for deterministic models like CNP.
-    Provides the core training and testing logic.
-    """
-
-    def _train_step_logic(self, context_x, context_y, target_x, target_y):
-        with tf.GradientTape() as tape:
-            mean, std = self((context_x, context_y, target_x), training=True)
-            # The loss is the negative log-likelihood of the targets
-            # under the predicted distribution.
-            dist = tfp.distributions.MultivariateNormalDiag(mean, std)
-            loss_value = -ops.mean(dist.log_prob(target_y))
-        grads = tape.gradient(loss_value, self.trainable_weights)
-        self.optimizer.apply(grads, self.trainable_weights)
-        return {"loss": loss_value}
-
-    def _test_step_logic(self, context_x, context_y, pred_x):
-        mean, std = self((context_x, context_y, pred_x), training=False)
-        return mean, std
+    def get_config(self):
+        config = super().get_config()
+        config.update({
+            "encoder_sizes": self.encoder_sizes,
+            "decoder_sizes": self.decoder_sizes_hidden,
+            "output_dims": self.output_dims,
+        })
+        return config
 
 
-class LatentModelMixin:
-    """
-    A mixin class providing the shared ELBO-based logic
-    for latent variable models like NP and ANP.
-    """
+@keras.saving.register_keras_serializable()
+class NP(keras.Model):
+    def __init__(self,
+                 det_encoder_sizes=[128]*4,
+                 latent_encoder_sizes=[128]*2,
+                 num_latents=128,
+                 decoder_sizes=[128]*2,
+                 output_dims=1,
+                 **kwargs
+                ):
+        super().__init__(**kwargs)
 
-    def _train_step_logic(self, context_x, context_y, target_x, target_y):
-        with tf.GradientTape() as tape:
-            # The `call` method of NP/ANP returns the predictive distribution,
-            # and the prior/posterior distributions for the latent variable z.
-            pred_dist, prior, posterior = self(
-                (context_x, context_y, target_x, target_y), training=True
+        self.output_dims = output_dims
+        self.num_latents = num_latents
+        
+        # Store architecture sizes for saving/loading
+        self.det_encoder_sizes = det_encoder_sizes
+        self.latent_encoder_sizes = latent_encoder_sizes
+        self.decoder_sizes_hidden = list(decoder_sizes)
+
+        # Instantiate the components
+        self.det_encoder = DeterministicEncoder(self.det_encoder_sizes)
+        self.latent_encoder = LatentEncoder(self.latent_encoder_sizes, self.num_latents)
+        
+        full_decoder_sizes = self.decoder_sizes_hidden + [2 * self.output_dims]
+        # The decoder now needs to handle the concatenated deterministic and latent representations
+        self.decoder = DeterministicDecoder(full_decoder_sizes)
+
+    def build(self, input_shape):
+        context_x_shape, context_y_shape, target_x_shape, target_y_shape = input_shape
+        # 1. Build the deterministic and latent encoders with its specific input shapes.
+        self.det_encoder.build((context_x_shape, context_y_shape))
+        self.latent_encoder.build((context_x_shape, context_y_shape))
+        
+        # 2. Determine the shape of the representation vector produced by the encoder
+        # Note that decoder input is concatenation of det_rep and latent_rep
+        det_rep_dim = self.det_encoder_sizes[-1]
+        latent_rep_dim = self.num_latents
+        representation_shape = (None, 1, det_rep_dim + latent_rep_dim)
+
+        # 3. Build the decoder with its specific input shapes.
+        self.decoder.build((representation_shape, target_x_shape))
+        
+        # 4. Check for shapes
+        xdims = context_x_shape[-1]  # No. of channels / dims in x
+        ydims = context_y_shape[-1]  # No. of channels / dims in y
+        if xdims > 1:
+            warnings.warn(
+                "Note: The encoder implementation doesn't implicitly "
+                "depend on xdims. Ensure you use an encoder size that is "
+                "appropriate for your data.",
+                UserWarning,
             )
+        assert ydims == self.output_dims
 
-            # 1. Reconstruction Loss (the log-likelihood term in ELBO)
+        # 5. Call the parent's build method at the end.
+        super().build(input_shape)
+
+    def call(self, inputs, training=False):
+        context_x, context_y, target_x, target_y = inputs
+
+        # --- Latent Path ---
+        # The prior is based on the context set C
+        prior_dist = self.latent_encoder(context_x, context_y)
+
+        if training:
+            # The posterior is based on the full target set T (which includes C)
+            posterior_dist = self.latent_encoder(target_x, target_y)
+            # Sample z from the posterior for reconstruction during training
+            z = posterior_dist.sample()
+        else:
+            # At test time, sample from prior as posterior is unavailable
+            posterior_dist = None # Not available at test time
+            z = prior_dist.sample()
+
+        # Expand z to match the number of target points
+        num_targets = ops.shape(target_x)[1]
+        z_rep = ops.repeat(ops.expand_dims(z, axis=1), num_targets, axis=1)
+        
+        # --- Deterministic Path ---
+        det_rep = self.det_encoder(context_x, context_y) # Shape: (batch, 1, dim)
+        det_rep = ops.repeat(det_rep, num_targets, axis=1) # Shape: (batch, num_targets, dim)
+        
+        # --- Combine and Decode ---
+        representation = ops.concatenate([det_rep, z_rep], axis=-1)
+        mean, std = self.decoder(representation, target_x)
+        
+        pred_dist = tfp.distributions.MultivariateNormalDiag(mean, std)
+        
+        return pred_dist, prior_dist, posterior_dist
+
+    @tf.function(jit_compile=True)
+    def train_step(self, context_x, context_y, target_x, target_y):
+        with tf.GradientTape() as tape:
+            # Forward pass - `training=True` to get posterior
+            pred_dist, prior, posterior = self((context_x, context_y, target_x, target_y), training=True)
+            
+            # 1. Reconstruction Loss
             log_likelihood = pred_dist.log_prob(target_y)
-            reconstruction_loss = -ops.mean(log_likelihood)
 
-            # 2. KL Divergence (the regularization term in ELBO)
-            # This encourages the context-based prior to be close to the
-            # target-based posterior.
+            # 2. KL Divergence (Regularization)
             kl_div = tfp.distributions.kl_divergence(posterior, prior)
+            # Sum KL over latent dims, but average over batch
             kl_div = ops.mean(ops.sum(kl_div, axis=-1))
 
-            # 3. Final ELBO Loss to minimize
+            # 3. ELBO Loss
             # We want to maximize ELBO = log_likelihood - kl_div
-            # So we minimize Loss = -ELBO = -log_likelihood + kl_div
-            # The KL term is often weighted to balance the two losses.
+            # So we minimize -ELBO = -log_likelihood + kl_div
             num_targets_float = ops.cast(ops.shape(target_x)[1], "float32")
-            loss_value = reconstruction_loss + kl_div / num_targets_float
+            # The KL is weighted, a common practice to balance the terms
+            reconstruction_loss = -ops.mean(log_likelihood)
+            kl_div = kl_div / num_targets_float
+            loss_value = reconstruction_loss + kl_div
+            
+        grads = tape.gradient(loss_value, self.trainable_weights)
+        self.optimizer.apply(grads, self.trainable_weights)
+
+        return loss_value, reconstruction_loss, kl_div
+
+    @tf.function(jit_compile=True)
+    def test_step(self, context_x, context_y, pred_x):
+        # We don't have target_y, so it's None. `call` will sample from the prior.
+        target_y = None
+        pred_dist, _, _ = self((context_x, context_y, pred_x, target_y), training=False)
+        return pred_dist.mean(), pred_dist.stddev()
+
+    def train(
+        self,
+        X_train,
+        y_train,
+        epochs,
+        optimizer,
+        batch_size=64,
+        num_context_range=[2, 10],
+        num_context_mode="each",
+        dataset_type="gp",
+        X_val=None,
+        y_val=None,
+        plotcb=True,
+        pbar=True,
+        pred_points=None,
+        plot_every=1000,
+        stratify_labels=False,
+    ):        
+        self.optimizer = optimizer
+
+        if pbar:
+            progbar = Progbar(epochs, stateful_metrics=['loss', 'recon_loss', 'kl_div'])
+
+        if plotcb:
+            assert X_val is not None and y_val is not None, \
+                "Validation data must be provided if plotcb is True."
+            if pred_points is None and dataset_type == "gp":
+                pred_points = X_val.shape[1]
+
+        # Initialize callbacks
+        history = keras.callbacks.History()
+        callbacks = keras.callbacks.CallbackList([history], model=self)
+        callbacks.on_train_begin()
+
+        # no batching yet - possibly implement later
+        for epoch in range(1, epochs + 1):
+            # Reset metrics at start of each epoch
+            callbacks.on_epoch_begin(epoch)  # Called at start of epoch
+
+            context_x_train, context_y_train, target_x_train, target_y_train = next(train_iterator)
+
+            loss, reconstruction_loss, kl_div = self.train_step(
+                context_x_train, context_y_train, target_x_train, target_y_train
+            )
+
+            # Update metrics with both loss and mae if reqd.
+            logs = {
+                "loss": float(loss),
+                "reconstruction_loss": float(reconstruction_loss),
+                "kl_div": float(kl_div)
+            }
+            callbacks.on_epoch_end(epoch, logs)  # Called at end of epoch
+
+            if pbar:
+                progbar.update(epoch, values=[(k, float(v)) for k, v in logs.items()])
+
+            if plotcb and (epoch % plot_every == 0):
+                if dataset_type == "gp":
+                    utils.gplike_val_step(
+                        model=self,
+                        X_val=X_val,
+                        y_val=y_val,
+                        pred_points=pred_points,
+                        num_context_range=num_context_range,
+                        num_context_mode=num_context_mode,
+                        epoch=epoch,
+                        seed=seed_val,
+                    )
+                elif dataset_type == 'mnist':
+                    utils.mnist_val_step(
+                        model=self,
+                        X_val=X_val,
+                        y_val=y_val,
+                        num_context_range=num_context_range,
+                        epoch=epoch,
+                        seed=seed_val,
+                    )
+        callbacks.on_train_end()
+        return history
+
+    def get_config(self):
+        config = super().get_config()
+        config.update({
+            "det_encoder_sizes": self.det_encoder_sizes,
+            "latent_encoder_sizes": self.latent_encoder_sizes,
+            "num_latents": self.num_latents,
+            "decoder_sizes": self.decoder_sizes_hidden,
+            "output_dims": self.output_dims,
+        })
+        return config
+
+
+class ANP(keras.Model):
+    def __init__(self,
+                 encoder_sizes=[128]*4, # Simplified from att_encoder_sizes
+                 num_heads=8,
+                 latent_encoder_sizes=[128]*2,
+                 num_latents=128,
+                 decoder_sizes=[128]*2,
+                 output_dims=1,
+                 **kwargs
+                ):
+        super().__init__(**kwargs)
+
+        self.output_dims = output_dims
+        self.num_latents = num_latents
+        self.num_heads = num_heads
+        
+        self.encoder_sizes = encoder_sizes
+        self.latent_encoder_sizes = latent_encoder_sizes
+        self.decoder_sizes_hidden = list(decoder_sizes)
+
+        self.att_encoder = AttentiveEncoder(
+            self.encoder_sizes, self.num_heads
+        )
+        self.latent_encoder = LatentEncoder(
+            self.latent_encoder_sizes, self.num_latents
+        )
+        
+        full_decoder_sizes = self.decoder_sizes_hidden + [2 * self.output_dims]
+        self.decoder = DeterministicDecoder(full_decoder_sizes)
+
+    def build(self, input_shape):
+        (context_x_shape, context_y_shape, target_x_shape, target_y_shape) = input_shape
+
+        self.att_encoder.build((context_x_shape, context_y_shape, target_x_shape))
+        self.latent_encoder.build((context_x_shape, context_y_shape))
+        
+        det_rep_dim = self.encoder_sizes[-1]
+        latent_rep_dim = self.num_latents
+        representation_shape = (None, None, det_rep_dim + latent_rep_dim)
+        
+        self.decoder.build((representation_shape, target_x_shape))
+
+        super().build(input_shape)
+
+    def call(self, inputs, training=False):
+        context_x, context_y, target_x, target_y = inputs
+
+        # --- Latent Path ---
+        # The prior is based on the context set C
+        prior_dist = self.latent_encoder(context_x, context_y)
+
+        if training:
+            # The posterior is based on the full target set T (which includes C)
+            posterior_dist = self.latent_encoder(target_x, target_y)
+            # Sample z from the posterior for reconstruction during training
+            z = posterior_dist.sample()
+        else:
+            # At test time, sample from prior as posterior is unavailable
+            posterior_dist = None # Not available at test time
+            z = prior_dist.sample()
+
+        # Expand z to match the number of target points
+        num_targets = ops.shape(target_x)[1]
+        z_expanded = ops.expand_dims(z, axis=1)
+        z_shape = ops.shape(z_expanded)
+        z_rep = ops.broadcast_to(
+            z_expanded,
+            (z_shape[0], num_targets, z_shape[2]),
+        )
+
+        # --- Deterministic Path ---
+        det_rep = self.att_encoder(context_x, context_y, target_x)
+
+        # --- Combine and Decode ---
+        representation = ops.concatenate([det_rep, z_rep], axis=-1)
+        mean, std = self.decoder(representation, target_x)
+
+        pred_dist = tfp.distributions.MultivariateNormalDiag(mean, std)
+
+        return pred_dist, prior_dist, posterior_dist
+
+    @tf.function(jit_compile=True)
+    def train_step(self, context_x, context_y, target_x, target_y):
+        with tf.GradientTape() as tape:
+            # Forward pass - `training=True` to get posterior
+            pred_dist, prior, posterior = self((context_x, context_y, target_x, target_y), training=True)
+            
+            # 1. Reconstruction Loss
+            log_likelihood = pred_dist.log_prob(target_y)
+
+            # 2. KL Divergence (Regularization)
+            kl_div = tfp.distributions.kl_divergence(posterior, prior)
+            # Sum KL over latent dims, but average over batch
+            kl_div = ops.mean(ops.sum(kl_div, axis=-1))
+
+            # 3. ELBO Loss
+            # We want to maximize ELBO = log_likelihood - kl_div
+            # So we minimize -ELBO = -log_likelihood + kl_div
+            num_targets_float = ops.cast(ops.shape(target_x)[1], "float32")
+            # The KL is weighted, a common practice to balance the terms
+            reconstruction_loss = -ops.mean(log_likelihood)
+            kl_div = kl_div / num_targets_float
+            loss_value = reconstruction_loss + kl_div
 
         grads = tape.gradient(loss_value, self.trainable_weights)
         self.optimizer.apply(grads, self.trainable_weights)
 
-        return {"loss": loss_value, "recon_loss": reconstruction_loss, "kl_div": kl_div}
+        return loss_value, reconstruction_loss, kl_div
 
-    def _test_step_logic(self, context_x, context_y, pred_x):
-        # At test time, we don't have target_y. The `call` method will
-        # sample the latent z from the prior distribution p(z|context).
-
-        # Dummy target_y to avoid passing None, which can cause issues
-        # with Keras/optree internals when tracing the call graph. The values
-        # of this tensor are not used during inference.
-        shape = ops.shape(pred_x)
-        dummy_target_y = ops.zeros(
-            (shape[0], shape[1], self.y_dims), dtype=pred_x.dtype
-        )
-
-        pred_dist, _, _ = self(
-            (context_x, context_y, pred_x, dummy_target_y), training=False
-        )
+    @tf.function(jit_compile=True)
+    def test_step(self, context_x, context_y, pred_x):
+        # We don't have target_y, so it's None. `call` will sample from the prior.
+        target_y = None
+        pred_dist, _, _ = self((context_x, context_y, pred_x, target_y), training=False)
         return pred_dist.mean(), pred_dist.stddev()
 
 
-# =============================================================================
-# 3. FLAVOURED MODEL IMPLEMENTATIONS
-# =============================================================================
-
-
-@keras.saving.register_keras_serializable()
-class CNP(ConditionalModelMixin, BaseNeuralProcess):
-    """
-    Conditional Neural Process (CNP).
-    A deterministic model that uses a mean-aggregated representation.
-    """
-
-    def __init__(
+    def train(
         self,
-        encoder_sizes=[128, 128, 128, 128],
-        decoder_sizes=[128, 128],
-        y_dims=1,
-        **kwargs,
-    ):
-        super().__init__(**kwargs)
-        self.encoder_sizes = list(encoder_sizes)
-        self.decoder_sizes = list(decoder_sizes)
-        self.y_dims = y_dims
-        full_decoder_sizes = self.decoder_sizes + [
-            2 * self.y_dims
-        ]  # adding 2 per dim: mu and sigma
+        X_train,
+        y_train,
+        epochs,
+        optimizer,
+        batch_size=64,
+        num_context_range=[2, 10],
+        num_context_mode="each",
+        dataset_type="gp",
+        X_val=None,
+        y_val=None,
+        plotcb=True,
+        pbar=True,
+        pred_points=None,
+        plot_every=1000,
+        stratify_labels=False,
+    ):        
+        self.optimizer = optimizer
 
-        self.encoder = MeanEncoder(self.encoder_sizes)
-        self.decoder = Decoder(full_decoder_sizes)
+        train_dataset = create_np_dataset(
+            X_train,
+            y_train,
+            stratify_labels,  # Use labels for stratification if provided
+            batch_size,
+            num_context_range,
+            num_context_mode,
+            utils._sample_num_context,  # Pass the helper function
+            utils.get_context_set,        # Pass the helper function
+        )
 
-    def call(self, inputs, training=False):
-        context_x, context_y, target_x = inputs
+        train_iterator = iter(train_dataset)
 
-        # 1. Encode context to a single, global representation vector
-        representation = self.encoder(context_x, context_y)
+        if pbar:
+            progbar = Progbar(epochs, stateful_metrics=['loss', 'recon_loss', 'kl_div'])
 
-        # 2. Repeat the representation for each target point to match dimensions
-        num_targets = ops.shape(target_x)[1]
-        representation = ops.broadcast_to(
-            representation,
-            (ops.shape(representation)[0], num_targets, ops.shape(representation)[-1]),
-        )  # Shape: (batch, num_targets, dim)
+        if plotcb:
+            assert X_val is not None and y_val is not None, \
+                "Validation data must be provided if plotcb is True."
+            if pred_points is None and dataset_type == "gp":
+                pred_points = X_val.shape[1]
 
-        # 3. Decode to get predicted distribution
-        mean, std = self.decoder(representation, target_x)
-        return mean, std
+        # Initialize callbacks
+        history = keras.callbacks.History()
+        callbacks = keras.callbacks.CallbackList([history], model=self)
+        callbacks.on_train_begin()
+
+        # no batching yet - possibly implement later
+        for epoch in range(1, epochs + 1):
+            # Reset metrics at start of each epoch
+            callbacks.on_epoch_begin(epoch)  # Called at start of epoch
+
+            context_x_train, context_y_train, target_x_train, target_y_train = next(train_iterator)
+
+            loss, reconstruction_loss, kl_div = self.train_step(
+                context_x_train, context_y_train, target_x_train, target_y_train
+            )
+
+            # Update metrics with both loss and mae if reqd.
+            logs = {
+                "loss": float(loss),
+                "reconstruction_loss": float(reconstruction_loss),
+                "kl_div": float(kl_div)
+            }
+            callbacks.on_epoch_end(epoch, logs)  # Called at end of epoch
+
+            if pbar:
+                progbar.update(epoch, values=[(k, float(v)) for k, v in logs.items()])
+
+            if plotcb and (epoch % plot_every == 0):
+                if dataset_type == "gp":
+                    utils.gplike_val_step(
+                        model=self,
+                        X_val=X_val,
+                        y_val=y_val,
+                        pred_points=pred_points,
+                        num_context_range=num_context_range,
+                        num_context_mode=num_context_mode,
+                        epoch=epoch,
+                        seed=seed_val,
+                    )
+                elif dataset_type == 'mnist':
+                    utils.mnist_val_step(
+                        model=self,
+                        X_val=X_val,
+                        y_val=y_val,
+                        num_context_range=num_context_range,
+                        epoch=epoch,
+                        seed=seed_val,
+                    )
+        callbacks.on_train_end()
+        return history
 
     def get_config(self):
         config = super().get_config()
-        config.update(
-            {
-                "encoder_sizes": self.encoder_sizes,
-                "decoder_sizes": self.decoder_sizes,
-                "y_dims": self.y_dims,
-            }
-        )
-        return config
-
-
-@keras.saving.register_keras_serializable()
-class NP(LatentModelMixin, BaseNeuralProcess):
-    """
-    Neural Process (NP).
-    A probabilistic model with a deterministic path (using mean-aggregation)
-    and a latent path to model global uncertainty.
-    """
-
-    def __init__(
-        self,
-        det_encoder_sizes=[128, 128, 128, 128],
-        latent_encoder_sizes=[128, 128],
-        num_latents=128,
-        decoder_sizes=[128, 128],
-        y_dims=1,
-        **kwargs,
-    ):
-        super().__init__(**kwargs)
-        self.det_encoder_sizes = list(det_encoder_sizes)
-        self.latent_encoder_sizes = list(latent_encoder_sizes)
-        self.num_latents = num_latents
-        self.decoder_sizes = list(decoder_sizes)
-        self.y_dims = y_dims
-        full_decoder_sizes = self.decoder_sizes + [
-            2 * self.y_dims
-        ]  # adding 2 per dim: mu and sigma
-
-        self.det_encoder = MeanEncoder(self.det_encoder_sizes)
-        self.latent_encoder = LatentEncoder(self.latent_encoder_sizes, self.num_latents)
-        self.decoder = Decoder(full_decoder_sizes)
-
-    def call(self, inputs, training=False):
-        context_x, context_y, target_x, target_y = inputs
-
-        # Latent Path: determine prior and posterior distributions for z
-        prior_dist = self.latent_encoder(context_x, context_y)
-        if training:
-            # During training, we use the full target set to form a richer posterior
-            posterior_dist = self.latent_encoder(target_x, target_y)
-            z = posterior_dist.sample()
-        else:  # Inference time
-            # At test time, we only have the context, so we sample from the prior
-            posterior_dist = None
-            z = prior_dist.sample()
-
-        num_targets = ops.shape(target_x)[1]
-        z_rep = ops.broadcast_to(
-            ops.expand_dims(z, axis=1),
-            (ops.shape(z)[0], num_targets, ops.shape(z)[-1]),
-        )
-
-        # Deterministic Path (using mean encoder)
-        det_rep = self.det_encoder(context_x, context_y)
-        det_rep = ops.broadcast_to(
-            det_rep,
-            (ops.shape(det_rep)[0], num_targets, ops.shape(det_rep)[-1]),
-        )  # Shape: (batch, num_targets, dim)
-
-        # Combine and Decode
-        representation = ops.concatenate([det_rep, z_rep], axis=-1)
-        mean, std = self.decoder(representation, target_x)
-        pred_dist = tfp.distributions.MultivariateNormalDiag(mean, std)
-
-        return pred_dist, prior_dist, posterior_dist
-
-    def get_config(self):
-        config = super().get_config()
-        config.update(
-            {
-                "det_encoder_sizes": self.det_encoder_sizes,
-                "latent_encoder_sizes": self.latent_encoder_sizes,
-                "num_latents": self.num_latents,
-                "decoder_sizes": self.decoder_sizes,
-                "y_dims": self.y_dims,
-            }
-        )
-        return config
-
-
-@keras.saving.register_keras_serializable()
-class ANP(LatentModelMixin, BaseNeuralProcess):
-    """
-    Attentive Neural Process (ANP).
-    A probabilistic model that uses an attention mechanism in its deterministic
-    path to avoid underfitting, combined with a latent path for global uncertainty.
-    """
-
-    def __init__(
-        self,
-        att_encoder_sizes=[128, 128, 128, 128],
-        num_heads=8,
-        latent_encoder_sizes=[128, 128],
-        num_latents=128,
-        decoder_sizes=[128, 128],
-        y_dims=1,
-        **kwargs,
-    ):
-        super().__init__(**kwargs)
-        self.att_encoder_sizes = list(att_encoder_sizes)
-        self.num_heads = num_heads
-        self.latent_encoder_sizes = list(latent_encoder_sizes)
-        self.num_latents = num_latents
-        self.decoder_sizes = list(decoder_sizes)
-        self.y_dims = y_dims
-
-        full_decoder_sizes = self.decoder_sizes + [
-            2 * self.y_dims
-        ]  # adding 2 per dim: mu and sigma
-
-        self.att_encoder = AttentiveEncoder(self.att_encoder_sizes, self.num_heads)
-        self.latent_encoder = LatentEncoder(self.latent_encoder_sizes, self.num_latents)
-        self.decoder = Decoder(full_decoder_sizes)
-
-    def call(self, inputs, training=False):
-        context_x, context_y, target_x, target_y = inputs
-
-        # Latent Path (same as NP, provides global context)
-        prior_dist = self.latent_encoder(context_x, context_y)
-        if training:
-            posterior_dist = self.latent_encoder(target_x, target_y)
-            z = posterior_dist.sample()
-        else:  # Inference time
-            posterior_dist = None
-            z = prior_dist.sample()
-
-        num_targets = ops.shape(target_x)[1]
-        z_rep = ops.broadcast_to(
-            ops.expand_dims(z, axis=1),
-            (ops.shape(z)[0], num_targets, ops.shape(z)[-1]),
-        )
-
-        # Deterministic Path (uses attention to get target-specific context)
-        # Note: The output `det_rep` already has shape (batch, num_targets, features),
-        # so it does NOT need to be broadcasted like in CNP/NP.
-        det_rep = self.att_encoder(context_x, context_y, target_x)
-
-        # Combine and Decode
-        representation = ops.concatenate([det_rep, z_rep], axis=-1)
-        mean, std = self.decoder(representation, target_x)
-        pred_dist = tfp.distributions.MultivariateNormalDiag(mean, std)
-
-        return pred_dist, prior_dist, posterior_dist
-
-    def get_config(self):
-        config = super().get_config()
-        config.update(
-            {
-                "att_encoder_sizes": self.att_encoder_sizes,
-                "num_heads": self.num_heads,
-                "latent_encoder_sizes": self.latent_encoder_sizes,
-                "num_latents": self.num_latents,
-                "decoder_sizes": self.decoder_sizes,
-                "y_dims": self.y_dims,
-            }
-        )
+        config.update({
+            "encoder_sizes": self.encoder_sizes, # Simplified from att_encoder_sizes
+            "num_heads": self.num_heads,
+            "latent_encoder_sizes": self.latent_encoder_sizes,
+            "num_latents": self.num_latents,
+            "decoder_sizes": self.decoder_sizes_hidden,
+            "output_dims": self.output_dims,
+        })
         return config
