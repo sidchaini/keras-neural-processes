@@ -19,4 +19,4 @@ def get_version(rel_path):
         raise RuntimeError("Unable to find version string.")
 
 
-setup(version=get_version("keras_neural_processes/__init__.py"))
+setup(version=get_version("knp/__init__.py"))
