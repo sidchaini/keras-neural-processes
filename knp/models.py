@@ -8,9 +8,11 @@ from keras.utils import Progbar
 import tensorflow as tf
 import tensorflow_probability as tfp
 
-from .data import create_stratified_np_dataset, get_context_set_dense
-from .validation import val_step_physical
-from .CONSTANTS import get_ADDFLUX_FOR_MAG_CONST
+from .data import (
+    create_stratified_np_dataset,
+    get_context_set_dense,
+    get_context_set_dense_forecast,
+)
 
 # =============================================================================
 # 1. COMPOSITIONAL AGGREGATORS
@@ -489,7 +491,7 @@ class BaseNeuralProcess(keras.Model):
             )
         return inputs
 
-    def train_step(self, target_x, target_y, num_context):
+    def train_step(self, target_x, target_y, num_context, peak_t, forecast_prob):
         if self._compiled_train_step is None:
             print(
                 "[INFO] JIT Compiling train_step... (This happens only once)",
@@ -504,13 +506,15 @@ class BaseNeuralProcess(keras.Model):
                     tf.TensorSpec(
                         shape=[None, None, target_y.shape[-1]], dtype=target_y.dtype
                     ),
-                    tf.TensorSpec(
-                        shape=(), dtype=tf.int32
-                    ),  # New argument for num_context
+                    tf.TensorSpec(shape=(), dtype=tf.int32),  # num_context
+                    tf.TensorSpec(shape=[None], dtype=tf.float32),  # peak_t per batch element
+                    tf.TensorSpec(shape=(), dtype=tf.float32),  # forecast_prob scalar
                 ],
                 jit_compile=True,
             )
-        return self._compiled_train_step(target_x, target_y, num_context)
+        return self._compiled_train_step(
+            target_x, target_y, num_context, peak_t, forecast_prob
+        )
 
     def test_step(self, context_x, context_y, pred_x):
         if self._compiled_test_step is None:
@@ -546,18 +550,14 @@ class BaseNeuralProcess(keras.Model):
         optimizer,
         batch_size=64,
         num_context_choices=[50],
-        X_val=None,
-        y_val=None,
         plotcb=True,
         pbar=True,
         plot_every=1000,
         seed=None,
         stratify_labels=None,
         num_target_points=100,
-        # TODO FIX below all_scenarios, time_scaler and flux_scaler
-        all_scenarios=None,
-        time_scaler=None,
-        flux_scaler=None,
+        peak_idx=None,
+        forecast_prob=0.0,
     ):
         # FOR MIXED PRECISION
         # self.optimizer = keras.optimizers.LossScaleOptimizer(optimizer)
@@ -573,8 +573,10 @@ class BaseNeuralProcess(keras.Model):
             batch_size=batch_size,
             num_target_points=num_target_points,
             slice_width=num_target_points,
+            peak_idx_arr=peak_idx,
         )
         train_iterator = iter(train_dataset)
+        forecast_prob_t = tf.constant(forecast_prob, dtype=tf.float32)
 
         if pbar:
             metric_names = ["loss"] + getattr(self, "extra_metrics", [])
@@ -588,14 +590,16 @@ class BaseNeuralProcess(keras.Model):
             callbacks.on_epoch_begin(epoch)
 
             # 1. Get the full (resampled) target set
-            target_x, target_y, _ = next(train_iterator)
+            target_x, target_y, _, peak_t = next(train_iterator)
 
             # 2. Decide how many context points to sample (this is a simple Python op)
             num_context = np.random.choice(num_context_choices)
 
             # 3. Pass the full target set AND the number of context points to train_step
             #    The actual sampling will now happen inside the compiled function.
-            logs = self.train_step(target_x, target_y, num_context)
+            logs = self.train_step(
+                target_x, target_y, num_context, peak_t, forecast_prob_t
+            )
 
             callbacks.on_epoch_end(epoch, logs)
             if pbar:
@@ -607,21 +611,6 @@ class BaseNeuralProcess(keras.Model):
                 print(f"Iteration {epoch}")
                 print("*" * 50)
                 print(f"Train logs: {logs}")
-
-                # run_physics_validation(...)
-                resu = val_step_physical(
-                    self,
-                    all_scenarios,
-                    time_scaler,
-                    flux_scaler,
-                    X_val,
-                    y_val,
-                    TEST_OBJ_CHOOSE=1,
-                    SCENARIO_CHOOSE=0,
-                    ADDFLUX_FOR_MAG_CONST=get_ADDFLUX_FOR_MAG_CONST(flux_scaler),
-                    epochnum=epoch,
-                )
-                resu.to_parquet(f"results_{epoch}.parquet")
 
         callbacks.on_train_end()
         return history
@@ -666,8 +655,10 @@ class ConditionalModelMixin:
 
     extra_metrics = []
 
-    def _train_step_logic(self, target_x, target_y, num_context):
-        context_x, context_y = get_context_set_dense(target_x, target_y, num_context)
+    def _train_step_logic(self, target_x, target_y, num_context, peak_t, forecast_prob):
+        context_x, context_y = get_context_set_dense_forecast(
+            target_x, target_y, num_context, peak_t, forecast_prob
+        )
 
         with tf.GradientTape() as tape:
             mean, std = self((context_x, context_y, target_x, target_y), training=True)
@@ -689,8 +680,10 @@ class LatentModelMixin:
 
     extra_metrics = ["reconstruction_loss", "kl_div"]
 
-    def _train_step_logic(self, target_x, target_y, num_context):
-        context_x, context_y = get_context_set_dense(target_x, target_y, num_context)
+    def _train_step_logic(self, target_x, target_y, num_context, peak_t, forecast_prob):
+        context_x, context_y = get_context_set_dense_forecast(
+            target_x, target_y, num_context, peak_t, forecast_prob
+        )
 
         with tf.GradientTape() as tape:
             pred_dist, prior, posterior = self(
